@@ -45,7 +45,7 @@ Item {
         anchors.centerIn: parent
         visible: page.results.length === 0
         spacing: 8
-        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Theme.glyph("search"); color: Theme.dimFg; font.pointSize: 48 }
+        Icon { anchors.horizontalCenter: parent.horizontalCenter; name: "search"; size: 96; color: Theme.dimFg }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: page.query === "" ? "Pesquise músicas, artistas e álbuns" : "Nenhum resultado"

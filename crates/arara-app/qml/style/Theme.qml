@@ -33,14 +33,5 @@ QtObject {
     readonly property string font: "Adwaita Sans, Cantarell, Inter, sans-serif"
     readonly property int fontSize: 11 // pt, GNOME default
 
-    // Symbolic icons: use the system icon theme (Adwaita) via image://theme when
-    // available, with unicode fallbacks for environments without it.
-    function glyph(name) {
-        return ({ "play": "▶", "pause": "⏸", "next": "⏭", "prev": "⏮",
-                  "search": "⌕", "close": "✕", "back": "‹", "lyrics": "♪",
-                  "menu": "☰", "min": "–", "max": "□", "shuffle": "⇄",
-                  "repeat": "↻", "repeat1": "↻¹", "star": "★", "unstar": "☆",
-                  "more": "⋮", "queue": "≡", "add": "+", "artist": "☺", "recent": "◷",
-                  "playlist": "☰", "volume": "♫", "trash": "✕" })[name] || "?"
-    }
+    // Icons: see Icon.qml (bundled Adwaita symbolic SVGs, tinted by a shader).
 }

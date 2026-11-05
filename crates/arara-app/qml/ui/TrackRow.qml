@@ -36,10 +36,11 @@ Rectangle {
         spacing: 12
         Item {
             width: row.showArt ? 38 : 22; height: 38
+            Icon { visible: !row.showArt && row.playing; anchors.centerIn: parent; name: "play"; size: 12; color: Theme.accentFg }
             Text {
-                visible: !row.showArt
+                visible: !row.showArt && !row.playing
                 anchors.centerIn: parent
-                text: row.playing ? Theme.glyph("play") : row.number + 1
+                text: row.number + 1
                 color: row.playing ? Theme.accentFg : Theme.dimFg
                 font.family: Theme.font; font.pointSize: Theme.fontSize - 1
             }

@@ -33,9 +33,9 @@ Rectangle {
             spacing: 2
             Repeater {
                 model: [
-                    { p: "albums", i: "menu", t: "Álbuns" },
+                    { p: "albums", i: "albums", t: "Álbuns" },
                     { p: "artists", i: "artist", t: "Artistas" },
-                    { p: "songs", i: "search", t: "Músicas" },
+                    { p: "songs", i: "songs", t: "Músicas" },
                     { p: "starred", i: "star", t: "Favoritas" },
                     { p: "recent", i: "recent", t: "Recentes" }
                 ]

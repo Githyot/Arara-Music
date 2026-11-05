@@ -23,10 +23,18 @@ Rectangle {
          : ma.pressed ? Theme.pressed : ma.containsMouse ? Theme.hover : "transparent"
     Behavior on color { ColorAnimation { duration: 100 } }
 
+    Icon {
+        anchors.centerIn: parent
+        visible: root.text === "" && root.icon !== ""
+        name: root.icon
+        size: root.size >= 40 ? 20 : 16
+        color: root.suggested || root.destructive ? "white" : (root.checked ? Theme.accentFg : Theme.fg)
+    }
     Text {
         id: label
         anchors.centerIn: parent
-        text: root.text !== "" ? root.text : Theme.glyph(root.icon)
+        visible: root.text !== ""
+        text: root.text
         color: root.suggested || root.destructive ? "white" : Theme.fg
         font.family: Theme.font
         font.pointSize: root.text !== "" ? Theme.fontSize : Math.round(root.size * 0.36)

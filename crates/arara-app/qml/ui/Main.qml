@@ -355,7 +355,7 @@ Window {
                     anchors.centerIn: parent
                     visible: nav.page === "albums" && albumGrid.count === 0
                     spacing: 10
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: Theme.glyph("lyrics"); color: Theme.dimFg; font.pointSize: 56 }
+                    Icon { anchors.horizontalCenter: parent.horizontalCenter; name: "folder-music"; size: 96; color: Theme.dimFg }
                     Text { anchors.horizontalCenter: parent.horizontalCenter; text: library.scanning ? "Indexando sua biblioteca…" : "Nenhuma música encontrada"; color: Theme.fg; font.family: Theme.font; font.pointSize: 18; font.weight: Font.Bold }
                     Text { anchors.horizontalCenter: parent.horizontalCenter; text: library.scanning ? library.status : library.libraryDir; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
                 }

@@ -47,10 +47,10 @@ GridView {
                     fillMode: Image.PreserveAspectCrop
                     visible: status === Image.Ready
                 }
-                Text {
+                Icon {
                     anchors.centerIn: parent
                     visible: modelData.cover === ""
-                    text: Theme.glyph("lyrics"); color: Theme.dimFg; font.pointSize: 40
+                    name: "albums"; size: 64; color: Theme.dimFg
                 }
                 Rectangle { anchors.fill: parent; color: "white"; opacity: ma.containsMouse ? 0.08 : 0; radius: parent.radius }
             }

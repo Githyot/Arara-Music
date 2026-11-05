@@ -30,7 +30,7 @@ Dependências (Ubuntu/Debian):
 sudo apt install qt6-base-dev qt6-declarative-dev qt6-multimedia-dev \
   qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
   qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtmultimedia \
-  qml6-module-qtqml-workerscript gstreamer1.0-plugins-good
+  qml6-module-qtqml-workerscript libqt6svg6 gstreamer1.0-plugins-good
 ```
 
 Fedora: `sudo dnf install qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtmultimedia-devel`

@@ -80,6 +80,12 @@ Rectangle {
             color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1
             function fmt(ms) { var s = Math.floor(ms / 1000); return Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2) }
         }
+        FlatButton {
+            visible: bar.width > 860
+            icon: bar.volume <= 0.001 ? "mute" : "volume"; circular: true; size: 30
+            property real last: 1.0
+            onClicked: { if (bar.volume > 0.001) { last = bar.volume; bar.volumeMoved(0) } else bar.volumeMoved(last) }
+        }
         Slider {
             id: vol
             visible: bar.width > 860
