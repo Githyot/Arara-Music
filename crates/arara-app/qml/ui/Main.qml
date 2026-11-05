@@ -98,6 +98,11 @@ Window {
             if (i < index) index--
             queue = q; save()
         }
+        function move(from, to) {
+            var cur = current
+            var q = queue.slice(); var t = q.splice(from, 1)[0]; q.splice(to, 0, t)
+            queue = q; index = q.indexOf(cur); save()
+        }
         function toggleShuffle() {
             if (!current) { shuffle = !shuffle; return }
             if (!shuffle) {
@@ -344,6 +349,7 @@ Window {
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onRemoveAt: (i) => library.removeFromPlaylist(nav.playlist.id, i)
+                    onMoveItem: (f, t) => library.moveInPlaylist(nav.playlist.id, f, t)
                     onRenameRequested: prompt.ask("Renomear playlist", "", nav.playlist.name, "Renomear", function (name) { library.renamePlaylist(nav.playlist.id, name) })
                     onDeleteRequested: prompt.confirm("Excluir “" + nav.playlist.name + "”?", "As músicas continuam na biblioteca.", "Excluir", function () {
                         var id = nav.playlist.id; nav.root("albums"); library.deletePlaylist(id)
@@ -394,6 +400,7 @@ Window {
             onClose: visible = false
             onJump: (i) => player.jump(i)
             onRemoveAt: (i) => player.removeAt(i)
+            onMoveItem: (f, t) => player.move(f, t)
             MouseArea { anchors { left: parent.left; right: parent.right; top: parent.top } height: Theme.headerHeight; z: -1; onPressed: win.startSystemMove() }
         }
 

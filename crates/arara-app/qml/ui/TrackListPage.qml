@@ -17,6 +17,8 @@ Item {
     signal menuRequested(var track, real x, real y)
     signal starToggled(var track, bool starred)
     signal removeAt(int index)
+    signal moveItem(int from, int to)
+    DragReorder { id: reorder; view: lv; onMoved: (f, t) => page.moveItem(f, t) }
     signal renameRequested()
     signal deleteRequested()
 
@@ -77,6 +79,11 @@ Item {
                     track: modelData; number: index; showArt: true
                     playing: modelData.id === page.playingId
                     removable: page.removable
+                    draggable: page.removable
+                    dropMark: reorder.mark(index)
+                    onDragStart: reorder.start(index)
+                    onDragMove: (y) => reorder.move(y)
+                    onDragEnd: reorder.end()
                     onActivated: page.play(page.tracks, index)
                     onMenuRequested: (t, x, y) => page.menuRequested(t, x, y)
                     onStarToggled: (t, s) => page.starToggled(t, s)

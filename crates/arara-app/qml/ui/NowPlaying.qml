@@ -15,6 +15,7 @@ Rectangle {
     signal close()
     signal jump(int index)
     signal removeAt(int index)
+    signal moveItem(int from, int to)
 
     color: Theme.windowBg
     readonly property bool wide: width > 820
@@ -96,6 +97,7 @@ Rectangle {
             current: np.queueIndex
             onJump: (i) => np.jump(i)
             onRemoveAt: (i) => np.removeAt(i)
+            onMoveItem: (f, t) => np.moveItem(f, t)
         }
     }
 

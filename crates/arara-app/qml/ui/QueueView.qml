@@ -8,6 +8,8 @@ ListView {
     property int current: -1
     signal jump(int index)
     signal removeAt(int index)
+    signal moveItem(int from, int to)
+    property DragReorder reorder: DragReorder { view: lv; onMoved: (f, t) => lv.moveItem(f, t) }
 
     clip: true
     model: queue
@@ -32,6 +34,11 @@ ListView {
                 track: modelData; number: index; showArt: true
                 playing: index === lv.current
                 removable: index !== lv.current
+                draggable: true
+                dropMark: lv.reorder.mark(index)
+                onDragStart: lv.reorder.start(index)
+                onDragMove: (y) => lv.reorder.move(y)
+                onDragEnd: lv.reorder.end()
                 onActivated: lv.jump(index)
                 onRemoveRequested: lv.removeAt(index)
             }

@@ -20,6 +20,7 @@ fn main() {
         "qml/ui/TrackMenu.qml",
         "qml/ui/TextPrompt.qml",
         "qml/ui/QueueView.qml",
+        "qml/ui/DragReorder.qml",
     ]))
     // Theme singleton lives in its own tiny module so every file can `import AraraStyle`.
     .qrc("style.qrc")

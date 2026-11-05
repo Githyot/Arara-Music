@@ -10,6 +10,12 @@ Rectangle {
     property bool showArt: false
     property bool playing: false
     property bool removable: false
+    property bool draggable: false
+    // Drop indicator: -1 none, 0 line above, 1 line below
+    property int dropMark: -1
+    signal dragStart()
+    signal dragMove(real sceneY)
+    signal dragEnd()
     property bool starred: track ? !!track.starred : false
     signal activated()
     signal starToggled(var track, bool starred)
@@ -31,8 +37,29 @@ Rectangle {
         }
     }
 
+    Item {
+        id: handle
+        visible: row.draggable
+        width: visible ? 28 : 0; height: parent.height
+        anchors { left: parent.left; leftMargin: 4 }
+        Icon { anchors.centerIn: parent; name: "drag"; size: 16; color: Theme.dimFg; opacity: hm.containsMouse || hm.pressed ? 1 : 0.6 }
+        MouseArea {
+            id: hm
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            preventStealing: true
+            onPressed: row.dragStart()
+            onPositionChanged: (m) => { if (pressed) row.dragMove(mapToItem(null, m.x, m.y).y) }
+            onReleased: row.dragEnd()
+            onCanceled: row.dragEnd()
+        }
+    }
+    Rectangle { visible: row.dropMark === 0; anchors { left: parent.left; right: parent.right; top: parent.top } height: 2; color: Theme.accent; z: 5 }
+    Rectangle { visible: row.dropMark === 1; anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 2; color: Theme.accent; z: 5 }
+
     Row {
-        anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+        anchors { left: handle.right; leftMargin: row.draggable ? 2 : 14; verticalCenter: parent.verticalCenter }
         spacing: 12
         Item {
             width: row.showArt ? 38 : 22; height: 38

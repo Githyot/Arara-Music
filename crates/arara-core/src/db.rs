@@ -362,6 +362,31 @@ impl Db {
         Ok(())
     }
 
+    /// Move the item at `from` to `to` (both 0-based), shifting the others.
+    pub fn move_in_playlist(&self, playlist_id: i64, from: i64, to: i64) -> Result<()> {
+        let mut ids: Vec<i64> = {
+            let mut st = self.conn.prepare_cached("SELECT track_id FROM playlist_items WHERE playlist_id=?1 ORDER BY pos")?;
+            let rows = st.query_map([playlist_id], |r| r.get(0))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let (f, t) = (from as usize, to as usize);
+        if f >= ids.len() || t >= ids.len() || f == t {
+            return Ok(());
+        }
+        let id = ids.remove(f);
+        ids.insert(t, id);
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM playlist_items WHERE playlist_id=?1", [playlist_id])?;
+        {
+            let mut st = tx.prepare_cached("INSERT INTO playlist_items(playlist_id, pos, track_id) VALUES (?1, ?2, ?3)")?;
+            for (i, t) in ids.iter().enumerate() {
+                st.execute(params![playlist_id, i as i64, t])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn playlist_tracks(&self, playlist_id: i64) -> Result<Vec<TrackRow>> {
         let mut st = self.conn.prepare_cached(&format!(
             "SELECT {TRACK_COLS} FROM playlist_items i JOIN tracks t ON t.id = i.track_id
@@ -466,6 +491,10 @@ mod tests {
         db.add_to_playlist(p, &[2]).unwrap();
         let ids: Vec<i64> = db.playlist_tracks(p).unwrap().iter().map(|t| t.id).collect();
         assert_eq!(ids, vec![1, 3, 4, 2]);
+        db.move_in_playlist(p, 3, 0).unwrap();
+        db.move_in_playlist(p, 1, 2).unwrap();
+        let ids: Vec<i64> = db.playlist_tracks(p).unwrap().iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec![2, 3, 1, 4]);
         assert_eq!(db.playlists().unwrap()[0].track_count, 4);
         db.delete_playlist(p).unwrap();
         assert!(db.playlists().unwrap().is_empty());

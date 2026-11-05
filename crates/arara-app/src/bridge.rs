@@ -101,6 +101,10 @@ pub mod qobject {
         fn add_to_playlist(self: Pin<&mut Library>, playlist_id: i64, track_ids_json: &QString);
 
         #[qinvokable]
+        #[cxx_name = "moveInPlaylist"]
+        fn move_in_playlist(self: Pin<&mut Library>, playlist_id: i64, from: i64, to: i64);
+
+        #[qinvokable]
         #[cxx_name = "removeFromPlaylist"]
         fn remove_from_playlist(self: Pin<&mut Library>, playlist_id: i64, pos: i64);
 
@@ -506,6 +510,13 @@ impl qobject::Library {
         let ids: Vec<i64> = serde_json::from_str(&track_ids_json.to_string()).unwrap_or_default();
         if let Some(db) = &self.db {
             let _ = db.add_to_playlist(playlist_id, &ids);
+        }
+        self.as_mut().playlists_changed();
+    }
+
+    pub fn move_in_playlist(mut self: Pin<&mut Self>, playlist_id: i64, from: i64, to: i64) {
+        if let Some(db) = &self.db {
+            let _ = db.move_in_playlist(playlist_id, from, to);
         }
         self.as_mut().playlists_changed();
     }
