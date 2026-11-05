@@ -50,6 +50,17 @@ cargo build --release
 
 Variáveis úteis: `ARARA_LIBRARY=/caminho` (pasta da biblioteca), `ARARA_DARK=1`, `ARARA_OFFLINE=1` (não consulta o LRCLIB) e `--ssd` (usa a barra de título do sistema em vez da própria).
 
+## RPM (Fedora 40 ou mais novo)
+
+```sh
+cargo build --release
+mkdir -p ~/rpmbuild/SOURCES && strip -o ~/rpmbuild/SOURCES/arara-music target/release/arara-music \
+  && strip -o ~/rpmbuild/SOURCES/arara target/release/arara \
+  && cp data/*.desktop data/*.metainfo.xml data/icons/*.svg LICENSE ~/rpmbuild/SOURCES/
+rpmbuild -bb packaging/arara-music.spec
+sudo dnf install ~/rpmbuild/RPMS/x86_64/arara-music-*.rpm
+```
+
 ## Flatpak
 
 ```sh
