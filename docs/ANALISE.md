@@ -59,11 +59,32 @@ Não rodei o Nocturne aqui com a mesma biblioteca. A comparação é com os 7,1 
 - Tema escuro e cor de destaque lidos do portal `org.freedesktop.appearance` e atualizados ao vivo
 - Manifesto Flatpak, arquivo .desktop, metainfo e ícone
 
+## Feito na versão 0.3
+
+- **Ícones simbólicos do Adwaita** (SVG empacotados no app, tingidos pela cor do tema) no lugar dos caracteres Unicode.
+- **Ordenação natural** de artistas e álbuns ("Artista 2" antes de "Artista 10"), via collation SQLite própria.
+- **Arrastar para reordenar** a fila e as playlists.
+- **Editor de letras**: colar o texto, sincronizar tocando a música e apertando Enter no início de cada verso (Backspace desfaz, ← volta 5 s), salvar no banco e, se quiser, como `.lrc` ao lado do arquivo, e **enviar ao LRCLIB** (com a prova de trabalho que a API exige). O envio não foi testado aqui porque a rede desta máquina bloqueia o LRCLIB.
+- **Lista de músicas nativa** (`QAbstractListModel` em Rust): a aba Músicas e a busca não criam mais um objeto JavaScript por faixa.
+- **Servidores remotos: Navidrome/Subsonic e Jellyfin.** O catálogo do servidor é espelhado no mesmo índice local, então busca, favoritas, playlists, letras e fila funcionam igual às músicas locais, a biblioteca remota abre na hora e dá para navegar mesmo com o servidor fora do ar. A sincronização baixa o catálogo em páginas de 500 (poucas requisições, não uma por álbum), baixa cada capa uma vez para o mesmo cache em disco e, nas próximas vezes, só regrava as faixas cujos metadados mudaram. Só o token derivado fica salvo (token MD5 com sal no Subsonic, token de acesso no Jellyfin), nunca a senha.
+- Correção: álbuns cuja primeira faixa lida não tinha capa ficavam sem capa mesmo quando outra faixa tinha.
+
+## Medições com 50 mil faixas (500 artistas, 5.000 álbuns, capa embutida na faixa 1 de cada álbum)
+
+| | Arara Music |
+|---|---|
+| Primeiro scan (sem cache) | 4,1 s, pico de 53 MB |
+| Reabrir sem mudanças | 0,2 s (50.000 arquivos verificados) |
+| Abrir o banco e listar os 5.000 álbuns | 13 ms |
+| Banco / cache de capas | 20 MB / 3,7 MB |
+| Janela aberta | 0,23 s |
+| App aberto (`RssAnon`) | 134 MB; 138 MB depois de rolar 300 vezes pela grade de álbuns; 168 MB com a aba Músicas aberta e rolada (50 mil linhas) |
+
+Servidor remoto simulado (`tools/mock_server.py`, API do Jellyfin) com 17.884 faixas e 1.910 capas: primeira sincronização em 3,0 s, sincronizações seguintes sem mudanças em 0,2 s.
+
 ## Próximos passos
 
-1. Trocar o JSON de álbuns por um `QAbstractListModel` em Rust, para acervos com mais de 50 mil faixas.
-2. Editor de letras e envio de letras sincronizadas para o LRCLIB.
-3. Jellyfin/Subsonic (o núcleo já separa índice e fonte).
-4. Arrastar para reordenar fila e playlists; ordenação natural de nomes ("Artista 2" antes de "Artista 10").
-5. Ícones simbólicos do Adwaita em SVG no lugar dos caracteres Unicode.
-6. Testar o Flatpak em uma máquina com flatpak-builder (aqui não deu para rodar).
+1. Guardar os tokens dos servidores no chaveiro do GNOME (Secret Service) em vez do banco.
+2. Cache de áudio para ouvir músicas do servidor offline, e transcodificação opcional para conexões lentas.
+3. Testar com Navidrome e Jellyfin de verdade (aqui foi usado um servidor simulado, porque a rede desta máquina só alcança o próprio computador).
+4. Testar o Flatpak em uma máquina com flatpak-builder (aqui não deu para rodar).
