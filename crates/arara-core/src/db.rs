@@ -69,7 +69,130 @@ CREATE TABLE IF NOT EXISTS playlist_items (
     PRIMARY KEY (playlist_id, pos)
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+
+-- Remote libraries (Subsonic/Navidrome, Jellyfin). Their tracks live in `tracks`
+-- like local ones, with path 'remote://<server id>/<item id>', so search, stars,
+-- playlists, lyrics and the queue work the same and the catalog is cached offline.
+CREATE TABLE IF NOT EXISTS servers (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,     -- 'subsonic' | 'jellyfin'
+    name        TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    auth        TEXT NOT NULL,     -- JSON: derived token, never the password
+    last_sync   INTEGER,
+    track_count INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT
+);
 "#;
+
+/// Serializes writers (local scan, remote syncs) so long transactions never
+/// collide on SQLite's single write lock.
+pub static WRITER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// One track to insert or update, from a file tag or a remote server.
+pub struct NewTrack<'a> {
+    pub path: &'a str,
+    pub mtime: i64,
+    pub size: i64,
+    pub title: &'a str,
+    pub artist: &'a str,
+    pub album_artist: &'a str,
+    pub album: Option<&'a str>,
+    pub track_no: Option<u32>,
+    pub disc_no: Option<u32>,
+    pub year: Option<u32>,
+    pub duration_ms: i64,
+    pub track_gain: Option<f64>,
+    pub album_gain: Option<f64>,
+    pub cover_hash: Option<&'a str>,
+}
+
+/// Insert/update one track (plus its artist, album and search entry) on an open
+/// transaction. Returns true when a cover hash was written to its album.
+pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
+    let aa = if p.album_artist.is_empty() { "Artista desconhecido" } else { p.album_artist };
+    c.execute("INSERT OR IGNORE INTO artists(name) VALUES (?1)", [aa])?;
+    let artist_id: i64 = c.query_row("SELECT id FROM artists WHERE name=?1", [aa], |r| r.get(0))?;
+
+    let album_id: Option<i64> = match p.album {
+        Some(title) => {
+            c.execute(
+                "INSERT OR IGNORE INTO albums(title, artist_id, year, added_at) VALUES (?1,?2,?3,?4)",
+                params![title, artist_id, p.year, now],
+            )?;
+            Some(c.query_row(
+                "SELECT id FROM albums WHERE title=?1 AND artist_id=?2",
+                params![title, artist_id],
+                |r| r.get(0),
+            )?)
+        }
+        None => None,
+    };
+    let mut cover_written = false;
+    if let (Some(aid), Some(hash)) = (album_id, p.cover_hash) {
+        c.execute("UPDATE albums SET cover_hash=?1 WHERE id=?2", params![hash, aid])?;
+        cover_written = true;
+    }
+
+    let old: Option<(i64, String, String, Option<String>)> = c
+        .query_row(
+            "SELECT t.id, t.title, t.artist, a.title FROM tracks t LEFT JOIN albums a ON a.id=t.album_id WHERE t.path=?1",
+            [p.path],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?;
+    if let Some((oid, ot, oa, oal)) = &old {
+        c.execute(
+            "INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album) VALUES('delete', ?1, ?2, ?3, ?4)",
+            params![oid, ot, oa, oal.clone().unwrap_or_default()],
+        )?;
+    }
+    c.execute(
+        "INSERT INTO tracks(path, mtime, size, title, artist, album_id, track_no, disc_no, year, duration_ms, track_gain, album_gain)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+         ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, title=excluded.title,
+           artist=excluded.artist, album_id=excluded.album_id, track_no=excluded.track_no,
+           disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,
+           track_gain=excluded.track_gain, album_gain=excluded.album_gain",
+        params![
+            p.path, p.mtime, p.size, p.title, p.artist, album_id, p.track_no, p.disc_no,
+            p.year, p.duration_ms, p.track_gain, p.album_gain
+        ],
+    )?;
+    let tid: i64 = c.query_row("SELECT id FROM tracks WHERE path=?1", [p.path], |r| r.get(0))?;
+    c.execute(
+        "INSERT INTO tracks_fts(rowid, title, artist, album) VALUES (?1,?2,?3,?4)",
+        params![tid, p.title, p.artist, p.album.unwrap_or_default()],
+    )?;
+    Ok(cover_written)
+}
+
+/// Delete tracks (and their search entries) whose path matches `filter`, then
+/// drop albums left empty. Returns how many tracks were removed.
+pub fn delete_tracks_where(c: &Connection, filter: impl Fn(&str) -> bool) -> Result<usize> {
+    let gone: Vec<(i64, String, String, String)> = {
+        let mut st = c.prepare(
+            "SELECT t.id, t.path, t.title, t.artist, COALESCE(a.title,'') FROM tracks t LEFT JOIN albums a ON a.id=t.album_id",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+        rows.flatten()
+            .filter(|(_, path, ..)| filter(path))
+            .map(|(id, _, t, a, al)| (id, t, a, al))
+            .collect()
+    };
+    for (id, t, a, al) in &gone {
+        c.execute(
+            "INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album) VALUES('delete', ?1, ?2, ?3, ?4)",
+            params![id, t, a, al],
+        )?;
+        c.execute("DELETE FROM tracks WHERE id=?1", [id])?;
+    }
+    c.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)", [])?;
+    Ok(gone.len())
+}
 
 pub struct Db {
     pub conn: Connection,
@@ -256,6 +379,18 @@ impl Db {
             Ok(ArtistRow { id: r.get(0)?, name: r.get(1)?, album_count: r.get(2)?, cover_hash: r.get(3)? })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Albums with at least one track whose path starts with `prefix` (e.g. one remote server).
+    pub fn albums_with_path_prefix(&self, prefix: &str) -> Result<Vec<AlbumRow>> {
+        let ids: std::collections::HashSet<i64> = {
+            let mut st = self.conn.prepare(
+                "SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL AND substr(path, 1, length(?1)) = ?1",
+            )?;
+            let rows = st.query_map([prefix], |r| r.get(0))?;
+            rows.flatten().collect()
+        };
+        Ok(self.albums()?.into_iter().filter(|a| ids.contains(&a.id)).collect())
     }
 
     pub fn artist_albums(&self, artist_id: i64) -> Result<Vec<AlbumRow>> {

@@ -36,5 +36,9 @@
     <file alias="icons/undo.svg">qml/style/icons/undo.svg</file>
     <file alias="icons/unstar.svg">qml/style/icons/unstar.svg</file>
     <file alias="icons/volume.svg">qml/style/icons/volume.svg</file>
+    <file alias="icons/server.svg">qml/style/icons/server.svg</file>
+    <file alias="icons/refresh.svg">qml/style/icons/refresh.svg</file>
+    <file alias="icons/warning.svg">qml/style/icons/warning.svg</file>
+    <file alias="icons/cloud.svg">qml/style/icons/cloud.svg</file>
   </qresource>
 </RCC>

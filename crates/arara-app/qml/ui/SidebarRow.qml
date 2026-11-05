@@ -14,10 +14,10 @@ Rectangle {
     color: current ? Theme.selected : ma.containsMouse ? Theme.hover : "transparent"
 
     Row {
-        anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+        anchors { left: parent.left; leftMargin: 12; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
         spacing: 12
-        Icon { anchors.verticalCenter: parent.verticalCenter; name: row.icon; size: 16 }
-        Text { text: row.text; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize }
+        Icon { id: ic; anchors.verticalCenter: parent.verticalCenter; name: row.icon; size: 16 }
+        Text { width: parent.width - ic.width - 12; elide: Text.ElideRight; text: row.text; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize }
     }
     MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; onClicked: row.clicked() }
 }

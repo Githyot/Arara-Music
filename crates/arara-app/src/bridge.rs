@@ -23,6 +23,7 @@ pub mod qobject {
         #[qproperty(QString, library_dir, cxx_name = "libraryDir")]
         #[qproperty(bool, dark)]
         #[qproperty(QString, accent)]
+        #[qproperty(bool, syncing)]
         type Library = super::LibraryRust;
 
         /// Opens the cached index (instant), starts a background rescan,
@@ -146,6 +147,37 @@ pub mod qobject {
         #[cxx_name = "lyricsPublished"]
         fn lyrics_published(self: Pin<&mut Library>, track_id: i64, ok: bool, message: QString);
 
+        /// Remote servers (Subsonic/Navidrome, Jellyfin) as JSON.
+        #[qinvokable]
+        #[cxx_name = "serversJson"]
+        fn servers_json(self: &Library) -> QString;
+
+        /// Logs in (in the background), stores the server and syncs it. Answers with serverAdded.
+        #[qinvokable]
+        #[cxx_name = "addServer"]
+        fn add_server(self: Pin<&mut Library>, kind: &QString, url: &QString, user: &QString, password: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "removeServer"]
+        fn remove_server(self: Pin<&mut Library>, server_id: i64);
+
+        /// Re-sync one server, or all with -1.
+        #[qinvokable]
+        #[cxx_name = "syncServers"]
+        fn sync_servers(self: Pin<&mut Library>, server_id: i64);
+
+        #[qinvokable]
+        #[cxx_name = "serverAlbumsJson"]
+        fn server_albums_json(self: &Library, server_id: i64) -> QString;
+
+        #[qsignal]
+        #[cxx_name = "serverAdded"]
+        fn server_added(self: Pin<&mut Library>, ok: bool, message: QString);
+
+        #[qsignal]
+        #[cxx_name = "serversChanged"]
+        fn servers_changed(self: Pin<&mut Library>);
+
         #[qsignal]
         #[cxx_name = "libraryChanged"]
         fn library_changed(self: Pin<&mut Library>);
@@ -169,7 +201,7 @@ pub mod qobject {
 }
 
 use crate::desktop::{self, Command, Mpris, TrackMeta};
-use arara_core::{covers::CoverCache, db::Db, lyrics, scanner, watcher::LibraryWatcher, Paths};
+use arara_core::{covers::CoverCache, db::Db, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
 use core::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
@@ -184,6 +216,9 @@ pub struct LibraryRust {
     library_dir: QString,
     dark: bool,
     accent: QString,
+    syncing: bool,
+    resolver: remote::Resolver,
+    sync_queue: Vec<i64>,
     db_path: PathBuf,
     covers_dir: PathBuf,
     db: Option<Db>,
@@ -209,6 +244,9 @@ impl Default for LibraryRust {
             library_dir: QString::default(),
             dark: system_prefers_dark(),
             accent: QString::from("#3584e4"),
+            syncing: false,
+            resolver: remote::Resolver::default(),
+            sync_queue: Vec::new(),
             db_path: p.db,
             covers_dir: p.covers,
             db: None,
@@ -280,6 +318,7 @@ impl qobject::Library {
     pub fn open(mut self: Pin<&mut Self>) {
         let db = Db::open(&self.db_path).ok();
         let stored_dir = db.as_ref().and_then(|d| d.get_kv("library_dir").ok().flatten());
+        self.as_mut().rust_mut().resolver = db.as_ref().map(remote::Resolver::load).unwrap_or_default();
         self.as_mut().rust_mut().db = db;
         self.as_mut().refresh_counts();
         self.as_mut().library_changed();
@@ -289,6 +328,10 @@ impl qobject::Library {
         self.as_mut().start_scan(&qs(&dir));
         self.as_mut().start_watching(&dir);
         self.as_mut().start_desktop_integration();
+        self.as_mut().servers_changed();
+        // Remote catalogs are already cached; refresh them in the background
+        // (the writer lock makes this wait for the local scan).
+        self.as_mut().sync_servers(-1);
     }
 
     fn start_watching(mut self: Pin<&mut Self>, dir: &str) {
@@ -428,7 +471,7 @@ impl qobject::Library {
         json!({
             "id": t.id, "title": t.title, "artist": t.artist, "album": t.album,
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
-            "url": format!("file://{}", t.path),
+            "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
@@ -603,7 +646,7 @@ impl qobject::Library {
         let (s, p) = if synced { (Some(text.as_str()), None) } else { (None, Some(text.as_str())) };
         let _ = db.store_lyrics(track_id, "user", s, p, now());
         if sidecar {
-            if let Ok(Some(t)) = db.track(track_id) {
+            if let Ok(Some(t)) = db.track(track_id).map(|t| t.filter(|t| !remote::is_remote(&t.path))) {
                 let ext = if synced { "lrc" } else { "txt" };
                 if let Err(e) = std::fs::write(std::path::Path::new(&t.path).with_extension(ext), &text) {
                     log::warn!("could not write sidecar lyrics: {e}");
@@ -671,5 +714,141 @@ impl qobject::Library {
                 m.set_position(ms * 1000)
             }
         }
+    }
+}
+
+// ---------- remote servers ----------
+impl qobject::Library {
+    pub fn servers_json(&self) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let v: Vec<_> = remote::servers(db)
+            .unwrap_or_default()
+            .iter()
+            .map(|s| {
+                json!({
+                    "id": s.id, "kind": s.kind.as_str(), "name": s.name, "url": s.url, "user": s.username,
+                    "tracks": s.track_count, "lastSync": s.last_sync, "error": s.last_error,
+                })
+            })
+            .collect();
+        qs(&serde_json::to_string(&v).unwrap())
+    }
+
+    pub fn server_albums_json(&self, server_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let v: Vec<_> = remote::server_albums(db, server_id).unwrap_or_default().iter().map(|a| self.album_value(a)).collect();
+        qs(&serde_json::to_string(&v).unwrap())
+    }
+
+    pub fn add_server(self: Pin<&mut Self>, kind: &QString, url: &QString, user: &QString, password: &QString) {
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        let (kind, url, user, password) = (kind.to_string(), url.to_string(), user.to_string(), password.to_string());
+        std::thread::spawn(move || {
+            let res = (|| -> Result<(i64, String), String> {
+                let kind = remote::Kind::parse(&kind).ok_or("tipo de servidor desconhecido")?;
+                if url.trim().is_empty() {
+                    return Err("informe o endereço do servidor".into());
+                }
+                let (url, auth, name) = remote::login(kind, &url, &user, &password)?;
+                let db = Db::open(&db_path).map_err(|e| e.to_string())?;
+                let id = remote::add_server(&db, kind, &name, &url, &user, &auth).map_err(|e| e.to_string())?;
+                Ok((id, name))
+            })();
+            let _ = qt.queue(move |mut o| match res {
+                Ok((id, name)) => {
+                    o.as_mut().reload_resolver();
+                    o.as_mut().servers_changed();
+                    o.as_mut().server_added(true, qs(&format!("Conectado a “{name}”. Sincronizando…")));
+                    o.as_mut().sync_servers(id);
+                }
+                Err(e) => o.as_mut().server_added(false, qs(&e)),
+            });
+        });
+    }
+
+    pub fn remove_server(mut self: Pin<&mut Self>, server_id: i64) {
+        let db_path = self.db_path.clone();
+        let removed = Db::open(&db_path).and_then(|mut db| remote::remove_server(&mut db, server_id));
+        if let Err(e) = removed {
+            self.as_mut().set_status(qs(&format!("Erro ao remover servidor: {e}")));
+        }
+        self.as_mut().reload_resolver();
+        self.as_mut().refresh_counts();
+        self.as_mut().servers_changed();
+        self.as_mut().library_changed();
+        self.as_mut().playlists_changed();
+    }
+
+    fn reload_resolver(mut self: Pin<&mut Self>) {
+        let r = self.db.as_ref().map(remote::Resolver::load).unwrap_or_default();
+        self.as_mut().rust_mut().resolver = r;
+    }
+
+    pub fn sync_servers(mut self: Pin<&mut Self>, server_id: i64) {
+        let ids: Vec<i64> = match &self.db {
+            Some(db) => remote::servers(db)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| s.id)
+                .filter(|id| server_id < 0 || *id == server_id)
+                .collect(),
+            None => return,
+        };
+        for id in ids {
+            if !self.sync_queue.contains(&id) {
+                self.as_mut().rust_mut().sync_queue.push(id);
+            }
+        }
+        if !self.syncing {
+            self.as_mut().sync_next();
+        }
+    }
+
+    /// Syncs queued servers one at a time on a worker thread.
+    fn sync_next(mut self: Pin<&mut Self>) {
+        if self.sync_queue.is_empty() {
+            self.as_mut().set_syncing(false);
+            return;
+        }
+        let id = self.as_mut().rust_mut().sync_queue.remove(0);
+        self.as_mut().set_syncing(true);
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        let covers_dir = self.covers_dir.clone();
+        std::thread::spawn(move || {
+            let res = (|| -> Result<(String, remote::SyncStats), (Option<String>, String)> {
+                let mut db = Db::open(&db_path).map_err(|e| (None, e.to_string()))?;
+                let covers = CoverCache::new(&covers_dir).map_err(|e| (None, e.to_string()))?;
+                let server = remote::server(&db, id).ok().flatten().ok_or((None, "servidor removido".to_string()))?;
+                let qt2 = qt.clone();
+                let stats = remote::sync(&mut db, &covers, &server, move |m| {
+                    let _ = qt2.queue(move |o| o.set_status(qs(&m)));
+                })
+                .map_err(|e| {
+                    let _ = remote::set_error(&db, id, Some(&e));
+                    (Some(server.name.clone()), e)
+                })?;
+                Ok((server.name, stats))
+            })();
+            let _ = qt.queue(move |mut o| {
+                match res {
+                    Ok((name, s)) => {
+                        o.as_mut().set_status(qs(&format!("{name}: {} faixas · {} ms", s.tracks, s.elapsed_ms)));
+                        if s.written > 0 || s.removed > 0 || s.covers > 0 {
+                            o.as_mut().refresh_counts();
+                            o.as_mut().library_changed();
+                            o.as_mut().playlists_changed();
+                        }
+                    }
+                    Err((name, e)) => {
+                        let who = name.map(|n| format!("{n}: ")).unwrap_or_default();
+                        o.as_mut().set_status(qs(&format!("{who}{e}")));
+                    }
+                }
+                o.as_mut().servers_changed();
+                o.as_mut().sync_next();
+            });
+        });
     }
 }

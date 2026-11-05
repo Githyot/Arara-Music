@@ -53,9 +53,10 @@ Item {
             required property string cover
             required property string coverBig
             required property string url
+            required property bool remote
             readonly property var track: ({ id: Number(trackId), title: title, artist: artist, album: album,
                                             albumId: Number(albumId) >= 0 ? Number(albumId) : null, duration: Number(duration),
-                                            starred: starred, cover: cover, coverBig: coverBig, url: url })
+                                            starred: starred, cover: cover, coverBig: coverBig, url: url, remote: remote })
             width: lv.width; height: 54
             Rectangle {
                 anchors { fill: parent; leftMargin: page.side; rightMargin: page.side }

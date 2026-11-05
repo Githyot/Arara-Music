@@ -31,6 +31,11 @@ Window {
             if (songs.loaded) songs.reload()
             nav.refresh()
         }
+        onServersChanged: {
+            sidebar.servers = JSON.parse(library.serversJson())
+            if (nav.page === "server") nav.refresh()
+        }
+        onServerAdded: (ok, message) => { addServer.finished(ok, message); if (ok) toast.show(message) }
         onPlaylistsChanged: { sidebar.playlists = JSON.parse(library.playlistsJson()); if (nav.page === "playlist") nav.refresh() }
         onLyricsReady: (trackId, json) => {
             // qint64 arrives as an object in JS; compare as numbers
@@ -174,17 +179,18 @@ Window {
         property var album: null
         property var artist: null
         property var playlist: null
+        property var server: null
         property var history: []
 
         function go(p) {
-            if (p !== page) history.push({ page: page, album: album, artist: artist, playlist: playlist })
+            if (p !== page) history.push({ page: page, album: album, artist: artist, playlist: playlist, server: server })
             page = p; refresh()
             if (p === "songs") search.forceActiveFocus()
         }
         function back() {
             var h = history.pop()
             if (!h) { page = "albums"; return }
-            page = h.page; album = h.album; artist = h.artist; playlist = h.playlist; refresh()
+            page = h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; refresh()
         }
         function root(p) { page = p; history = []; refresh(); if (p === "songs") search.forceActiveFocus() }
         function openAlbum(a) { album = a; albumPage.tracks = JSON.parse(library.albumTracksJson(a.id)); albumPage.contentY = 0; go("album") }
@@ -198,7 +204,15 @@ Window {
             if (a) openArtist(a)
         }
         function openPlaylist(p) { playlist = p; go("playlist") }
+        function openServer(s) { server = s; go("server") }
         function refresh() {
+            if (page === "server" && server) {
+                var all = JSON.parse(library.serversJson())
+                var sv = all.find(function (x) { return x.id === server.id })
+                if (!sv) { root("albums"); return }
+                server = sv
+                serverPage.albums = JSON.parse(library.serverAlbumsJson(sv.id))
+            }
             if (page === "starred") listPage.tracks = JSON.parse(library.starredJson())
             else if (page === "recent") listPage.tracks = JSON.parse(library.recentJson())
             else if (page === "playlist" && playlist) {
@@ -215,6 +229,7 @@ Window {
             : page === "starred" ? "Favoritas"
             : page === "recent" ? "Recentes"
             : page === "playlist" ? "Playlist"
+            : page === "server" ? "Servidor"
             : page === "songs" ? "" : "Álbuns"
     }
 
@@ -243,6 +258,10 @@ Window {
             footer: library.scanning ? library.status : library.trackCount + " faixas · " + library.albumCount + " álbuns"
             onNavigate: (p) => nav.root(p)
             onOpenPlaylist: (p) => { nav.history = []; nav.openPlaylist(p) }
+            servers: []
+            serverId: nav.server ? nav.server.id : -1
+            onOpenServer: (sv) => { nav.history = []; nav.openServer(sv) }
+            onAddServer: addServer.start()
             onNewPlaylist: prompt.ask("Nova playlist", "", "", "Criar", function (name) {
                 var id = Number(library.createPlaylist(name))
                 nav.openPlaylist({ id: id, name: name })
@@ -324,6 +343,19 @@ Window {
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onOpenArtist: (id) => nav.openArtistById(id)
+                }
+                ServerPage {
+                    id: serverPage
+                    anchors.fill: parent
+                    visible: nav.page === "server"
+                    server: nav.server
+                    syncing: library.syncing
+                    onOpenAlbum: (a) => nav.openAlbum(a)
+                    onSyncRequested: library.syncServers(nav.server.id)
+                    onRemoveRequested: prompt.confirm("Remover “" + nav.server.name + "”?",
+                        "As músicas desse servidor saem da biblioteca e das playlists. Nada é apagado no servidor.", "Remover", function () {
+                        var id = nav.server.id; nav.root("albums"); library.removeServer(id)
+                    })
                 }
                 SongsPage {
                     id: songs
@@ -462,6 +494,10 @@ Window {
         onGoToAlbum: (t) => { nowPlaying.visible = false; nav.openAlbumById(t.albumId) }
     }
     TextPrompt { id: prompt }
+    AddServerDialog {
+        id: addServer
+        onSubmit: (kind, url, user, password) => library.addServer(kind, url, user, password)
+    }
 
     // Edge resize handles for the frameless window.
     Repeater {
@@ -486,7 +522,7 @@ Window {
 
     onClosing: player.save()
 
-    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible; onActivated: playerBar.toggle() }
+    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible && !addServer.visible; onActivated: playerBar.toggle() }
     Shortcut { sequence: "Ctrl+F"; onActivated: nav.go("songs") }
     Shortcut { sequence: "Ctrl+Right"; onActivated: player.next() }
     Shortcut { sequence: "Ctrl+Left"; onActivated: player.prev() }

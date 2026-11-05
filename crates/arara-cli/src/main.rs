@@ -4,10 +4,13 @@
 //!   arara albums                 list albums from the cache
 //!   arara search <words>         full-text search
 //!   arara lyrics <track-id>      resolve lyrics (local + LRCLIB)
+//!   arara remote add <subsonic|jellyfin> <url> <user> <password>
+//!   arara remote sync [id]       mirror remote catalogs into the index
+//!   arara remote list
 //!
 //! Set ARARA_DB / ARARA_COVERS to override the XDG locations.
 
-use arara_core::{covers::CoverCache, db::Db, lyrics, scanner, Paths};
+use arara_core::{covers::CoverCache, db::Db, lyrics, remote, scanner, Paths};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -70,6 +73,38 @@ fn main() {
                 }
                 lyrics::Lyrics::Plain(p) => println!("{p}"),
                 lyrics::Lyrics::None => println!("(sem letra)"),
+            }
+        }
+        "remote" => {
+            let covers = CoverCache::new(&paths.covers).unwrap();
+            match rest.first().map(String::as_str) {
+                Some("add") if rest.len() == 5 => {
+                    let kind = remote::Kind::parse(&rest[1]).expect("subsonic ou jellyfin");
+                    match remote::login(kind, &rest[2], &rest[3], &rest[4]) {
+                        Ok((url, auth, name)) => {
+                            let id = remote::add_server(&db, kind, &name, &url, &rest[3], &auth).unwrap();
+                            println!("servidor {id}: {name} ({url})");
+                        }
+                        Err(e) => eprintln!("falhou: {e}"),
+                    }
+                }
+                Some("sync") => {
+                    let only: Option<i64> = rest.get(1).and_then(|s| s.parse().ok());
+                    for s in remote::servers(&db).unwrap().into_iter().filter(|s| only.map_or(true, |i| i == s.id)) {
+                        match remote::sync(&mut db, &covers, &s, |m| eprintln!("  {m}")) {
+                            Ok(st) => println!(
+                                "{}: tracks={} written={} removed={} covers={} in {} ms",
+                                s.name, st.tracks, st.written, st.removed, st.covers, st.elapsed_ms
+                            ),
+                            Err(e) => eprintln!("{}: {e}", s.name),
+                        }
+                    }
+                }
+                _ => {
+                    for s in remote::servers(&db).unwrap() {
+                        println!("{:>3}  {:<9} {}  {}  ({} faixas)", s.id, s.kind.as_str(), s.name, s.url, s.track_count);
+                    }
+                }
             }
         }
         _ => eprintln!("uso: arara scan <dir>... | albums | search <termos> | lyrics <id>"),

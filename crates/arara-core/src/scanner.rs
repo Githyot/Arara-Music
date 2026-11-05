@@ -11,7 +11,6 @@
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::{Accessor, ItemKey};
 use rayon::prelude::*;
-use rusqlite::params;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -207,6 +206,7 @@ pub fn scan(
     roots: &[PathBuf],
     mut on_event: impl FnMut(ScanEvent),
 ) -> Result<ScanStats> {
+    let _writer = crate::db::WRITER.lock().unwrap_or_else(|e| e.into_inner());
     let t0 = Instant::now();
     let mut stats = ScanStats::default();
     let known = db.known_files()?;
@@ -273,90 +273,39 @@ pub fn scan(
             };
             stats.parsed += 1;
 
-            let aa = if p.album_artist.is_empty() { "Artista desconhecido" } else { &p.album_artist };
-            txn.execute("INSERT OR IGNORE INTO artists(name) VALUES (?1)", [aa])?;
-            let artist_id: i64 =
-                txn.query_row("SELECT id FROM artists WHERE name=?1", [aa], |r| r.get(0))?;
-
-            let album_id: Option<i64> = match &p.album {
-                Some(title) => {
-                    txn.execute(
-                        "INSERT OR IGNORE INTO albums(title, artist_id, year, added_at) VALUES (?1,?2,?3,?4)",
-                        params![title, artist_id, p.year, now],
-                    )?;
-                    Some(txn.query_row(
-                        "SELECT id FROM albums WHERE title=?1 AND artist_id=?2",
-                        params![title, artist_id],
-                        |r| r.get(0),
-                    )?)
-                }
-                None => None,
-            };
-
-            if let (Some(aid), Some(hash)) = (album_id, &p.cover_hash) {
-                txn.execute("UPDATE albums SET cover_hash=?1 WHERE id=?2", params![hash, aid])?;
+            let cover_written = crate::db::upsert_track(
+                &txn,
+                &crate::db::NewTrack {
+                    path: &p.path,
+                    mtime: p.mtime,
+                    size: p.size,
+                    title: &p.title,
+                    artist: &p.artist,
+                    album_artist: &p.album_artist,
+                    album: p.album.as_deref(),
+                    track_no: p.track_no,
+                    disc_no: p.disc_no,
+                    year: p.year,
+                    duration_ms: p.duration_ms as i64,
+                    track_gain: p.track_gain,
+                    album_gain: p.album_gain,
+                    cover_hash: p.cover_hash.as_deref(),
+                },
+                now,
+            )?;
+            if cover_written {
                 stats.covers_written += 1;
             }
-
-            let old: Option<(i64, String, String, Option<String>)> = txn
-                .query_row(
-                    "SELECT t.id, t.title, t.artist, a.title FROM tracks t LEFT JOIN albums a ON a.id=t.album_id WHERE t.path=?1",
-                    [&p.path],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-                )
-                .ok();
-            if let Some((oid, ot, oa, oal)) = &old {
-                txn.execute(
-                    "INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album) VALUES('delete', ?1, ?2, ?3, ?4)",
-                    params![oid, ot, oa, oal.clone().unwrap_or_default()],
-                )?;
-            }
-
-            txn.execute(
-                "INSERT INTO tracks(path, mtime, size, title, artist, album_id, track_no, disc_no, year, duration_ms, track_gain, album_gain)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
-                 ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, title=excluded.title,
-                   artist=excluded.artist, album_id=excluded.album_id, track_no=excluded.track_no,
-                   disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,
-                   track_gain=excluded.track_gain, album_gain=excluded.album_gain",
-                params![
-                    p.path, p.mtime, p.size, p.title, p.artist, album_id, p.track_no, p.disc_no,
-                    p.year, p.duration_ms as i64, p.track_gain, p.album_gain
-                ],
-            )?;
-            let tid: i64 = txn.query_row("SELECT id FROM tracks WHERE path=?1", [&p.path], |r| r.get(0))?;
-            txn.execute(
-                "INSERT INTO tracks_fts(rowid, title, artist, album) VALUES (?1,?2,?3,?4)",
-                params![tid, p.title, p.artist, p.album.clone().unwrap_or_default()],
-            )?;
 
             if done % 250 == 0 {
                 on_event(ScanEvent::Parsed { done, total });
             }
         }
 
-        // 3. Remove tracks whose files are gone.
-        let gone: Vec<(i64, String, String, String)> = {
-            let mut st = txn.prepare(
-                "SELECT t.id, t.path, t.title, t.artist, COALESCE(a.title,'') FROM tracks t LEFT JOIN albums a ON a.id=t.album_id",
-            )?;
-            let rows = st.query_map([], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })?;
-            rows.flatten()
-                .filter(|(_, path, ..)| !seen_paths.contains(path))
-                .map(|(id, _, t, a, al)| (id, t, a, al))
-                .collect()
-        };
-        for (id, t, a, al) in &gone {
-            txn.execute(
-                "INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album) VALUES('delete', ?1, ?2, ?3, ?4)",
-                params![id, t, a, al],
-            )?;
-            txn.execute("DELETE FROM tracks WHERE id=?1", [id])?;
-        }
-        stats.removed = gone.len();
-        txn.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)", [])?;
+        // 3. Remove local tracks whose files are gone (remote tracks belong to their server's sync).
+        stats.removed = crate::db::delete_tracks_where(&txn, |path| {
+            !path.starts_with(crate::remote::PREFIX) && !seen_paths.contains(path)
+        })?;
         txn.commit()?;
         Ok(())
     })?;

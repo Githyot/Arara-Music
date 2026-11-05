@@ -99,6 +99,12 @@ Rectangle {
     Row {
         anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
         spacing: 2
+        Icon {
+            visible: !!(row.track && row.track.remote)
+            anchors.verticalCenter: parent.verticalCenter
+            name: "cloud"; size: 14; color: Theme.dimFg; opacity: 0.8
+        }
+        Item { visible: !!(row.track && row.track.remote); width: 4; height: 1 }
         FlatButton {
             id: starBtn
             size: 30; circular: true

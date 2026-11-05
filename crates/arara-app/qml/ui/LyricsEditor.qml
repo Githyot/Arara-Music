@@ -211,6 +211,7 @@ Rectangle {
         Row {
             anchors { left: parent.left; leftMargin: 18; verticalCenter: parent.verticalCenter }
             spacing: 10
+            visible: !(ed.track && ed.track.remote)   // no file next to a streamed song
             Rectangle {
                 id: sidecar
                 property bool checked: false

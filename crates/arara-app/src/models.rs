@@ -66,19 +66,20 @@ pub mod qobject {
 }
 
 use arara_core::db::{Db, TrackRow};
-use arara_core::Paths;
+use arara_core::{remote, Paths};
 use core::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use std::path::PathBuf;
 
-const ROLES: &[&str] = &["trackId", "title", "artist", "album", "albumId", "duration", "starred", "cover", "coverBig", "url"];
+const ROLES: &[&str] = &["trackId", "title", "artist", "album", "albumId", "duration", "starred", "cover", "coverBig", "url", "remote"];
 
 pub struct TrackModelRust {
     count: i32,
     rows: Vec<TrackRow>,
     db_path: PathBuf,
     covers_dir: PathBuf,
+    resolver: remote::Resolver,
 }
 
 impl Default for TrackModelRust {
@@ -90,7 +91,7 @@ impl Default for TrackModelRust {
         if let Ok(v) = std::env::var("ARARA_COVERS") {
             p.covers = v.into();
         }
-        Self { count: 0, rows: Vec::new(), db_path: p.db, covers_dir: p.covers }
+        Self { count: 0, rows: Vec::new(), db_path: p.db, covers_dir: p.covers, resolver: Default::default() }
     }
 }
 
@@ -105,7 +106,7 @@ impl TrackModelRust {
         serde_json::json!({
             "id": t.id, "title": t.title, "artist": t.artist, "album": t.album,
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
-            "url": format!("file://{}", t.path),
+            "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
@@ -113,7 +114,9 @@ impl TrackModelRust {
 
 impl qobject::TrackModel {
     fn replace_rows(mut self: Pin<&mut Self>, rows: Vec<TrackRow>) {
+        let resolver = Db::open(&self.db_path).map(|db| remote::Resolver::load(&db)).unwrap_or_default();
         self.as_mut().begin_reset_model();
+        self.as_mut().rust_mut().resolver = resolver;
         let n = rows.len() as i32;
         self.as_mut().rust_mut().rows = rows;
         self.as_mut().end_reset_model();
@@ -159,7 +162,8 @@ impl qobject::TrackModel {
             Some("starred") => QVariant::from(&t.starred),
             Some("cover") => s(&self.cover(&t.cover_hash, 256)),
             Some("coverBig") => s(&self.cover(&t.cover_hash, 640)),
-            Some("url") => s(&format!("file://{}", t.path)),
+            Some("url") => s(&self.resolver.url(&t.path)),
+            Some("remote") => QVariant::from(&remote::is_remote(&t.path)),
             _ => QVariant::default(),
         }
     }

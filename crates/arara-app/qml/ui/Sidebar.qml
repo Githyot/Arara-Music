@@ -7,11 +7,16 @@ Rectangle {
     property string page: "albums"
     property int playlistId: -1
     property var playlists: []
+    property var servers: []
+    property int serverId: -1
+    property bool syncing: false
     property string footer: ""
     property var window: null
     signal navigate(string page)
     signal openPlaylist(var playlist)
     signal newPlaylist()
+    signal openServer(var server)
+    signal addServer()
 
     color: Theme.sidebarBg
 
@@ -68,6 +73,30 @@ Rectangle {
                 visible: side.playlists.length === 0
                 x: 12; width: col.width - 24; wrapMode: Text.Wrap
                 text: "Crie uma playlist com o + ou pelo menu ⋮ de uma música."
+                color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 2
+            }
+            Item {
+                width: col.width; height: 40
+                Text {
+                    anchors { left: parent.left; leftMargin: 12; bottom: parent.bottom; bottomMargin: 6 }
+                    text: "Servidores"; color: Theme.dimFg
+                    font.family: Theme.font; font.pointSize: Theme.fontSize - 1; font.weight: Font.Bold
+                }
+                FlatButton { anchors { right: parent.right; bottom: parent.bottom } size: 28; icon: "add"; onClicked: side.addServer() }
+            }
+            Repeater {
+                model: side.servers
+                SidebarRow {
+                    required property var modelData
+                    width: col.width; icon: modelData.error ? "warning" : "server"; text: modelData.name
+                    current: side.page === "server" && side.serverId === modelData.id
+                    onClicked: side.openServer(modelData)
+                }
+            }
+            Text {
+                visible: side.servers.length === 0
+                x: 12; width: col.width - 24; wrapMode: Text.Wrap
+                text: "Ouça do seu Navidrome, Subsonic ou Jellyfin junto com as músicas locais."
                 color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 2
             }
         }
