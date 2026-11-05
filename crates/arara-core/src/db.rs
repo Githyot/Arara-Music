@@ -132,6 +132,7 @@ impl Db {
     }
 
     fn init(conn: Connection) -> Result<Self> {
+        conn.create_collation("NATSORT", crate::natural::natural_cmp)?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=NORMAL;
@@ -186,7 +187,7 @@ impl Db {
             "SELECT a.id, a.title, ar.name, a.year, a.cover_hash,
                     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id), a.artist_id
              FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id
-             ORDER BY ar.name, a.year, a.title",
+             ORDER BY ar.name COLLATE NATSORT, a.year, a.title COLLATE NATSORT",
         )?;
         let rows = st.query_map([], |r| {
             Ok(AlbumRow {
@@ -249,7 +250,7 @@ impl Db {
                     (SELECT a2.cover_hash FROM albums a2 WHERE a2.artist_id = ar.id AND a2.cover_hash IS NOT NULL
                      ORDER BY a2.year DESC LIMIT 1)
              FROM artists ar JOIN albums a ON a.artist_id = ar.id
-             GROUP BY ar.id ORDER BY ar.name",
+             GROUP BY ar.id ORDER BY ar.name COLLATE NATSORT",
         )?;
         let rows = st.query_map([], |r| {
             Ok(ArtistRow { id: r.get(0)?, name: r.get(1)?, album_count: r.get(2)?, cover_hash: r.get(3)? })
@@ -269,7 +270,7 @@ impl Db {
     }
 
     pub fn starred_tracks(&self) -> Result<Vec<TrackRow>> {
-        self.tracks_where("t.starred = 1 ORDER BY t.artist, a.title, t.disc_no, t.track_no", [])
+        self.tracks_where("t.starred = 1 ORDER BY t.artist COLLATE NATSORT, a.title COLLATE NATSORT, t.disc_no, t.track_no", [])
     }
 
     pub fn record_play(&self, track_id: i64, now: i64) -> Result<()> {
@@ -308,7 +309,7 @@ impl Db {
                      JOIN albums a ON a.id = t.album_id WHERE i2.playlist_id = p.id AND a.cover_hash IS NOT NULL
                      ORDER BY i2.pos LIMIT 1)
              FROM playlists p LEFT JOIN playlist_items i ON i.playlist_id = p.id
-             GROUP BY p.id ORDER BY p.name COLLATE NOCASE",
+             GROUP BY p.id ORDER BY p.name COLLATE NATSORT",
         )?;
         let rows = st.query_map([], |r| {
             Ok(PlaylistRow { id: r.get(0)?, name: r.get(1)?, track_count: r.get(2)?, cover_hash: r.get(3)? })
