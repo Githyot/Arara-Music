@@ -1,0 +1,13 @@
+[package]
+name = "arara-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "arara"
+path = "src/main.rs"
+
+[dependencies]
+arara-core = { path = "../arara-core" }
+env_logger = "0.11"
