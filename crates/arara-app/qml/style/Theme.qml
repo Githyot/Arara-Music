@@ -6,8 +6,10 @@ import QtQuick
 QtObject {
     property bool dark: false
 
-    readonly property color accent: "#3584e4"
-    readonly property color accentFg: dark ? "#78aeed" : "#1c71d8"
+    // System accent (GNOME 47+ via the settings portal); blue by default.
+    property color accent: "#3584e4"
+    // Accent used for text/icons: lighter on dark, darker on light, like libadwaita.
+    readonly property color accentFg: dark ? Qt.lighter(accent, 1.45) : Qt.darker(accent, 1.12)
     readonly property color destructive: dark ? "#ff7b63" : "#c01c28"
 
     readonly property color windowBg: dark ? "#222226" : "#fafafb"
@@ -37,6 +39,8 @@ QtObject {
         return ({ "play": "▶", "pause": "⏸", "next": "⏭", "prev": "⏮",
                   "search": "⌕", "close": "✕", "back": "‹", "lyrics": "♪",
                   "menu": "☰", "min": "–", "max": "□", "shuffle": "⇄",
-                  "repeat": "↻" })[name] || "?"
+                  "repeat": "↻", "repeat1": "↻¹", "star": "★", "unstar": "☆",
+                  "more": "⋮", "queue": "≡", "add": "+", "artist": "☺", "recent": "◷",
+                  "playlist": "☰", "volume": "♫", "trash": "✕" })[name] || "?"
     }
 }

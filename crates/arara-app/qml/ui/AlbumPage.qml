@@ -9,6 +9,9 @@ Flickable {
     property var tracks: []
     property int playingId: -1
     signal play(var tracks, int index)
+    signal menuRequested(var track, real x, real y)
+    signal starToggled(var track, bool starred)
+    signal openArtist(int artistId)
 
     clip: true
     contentHeight: body.height + 48
@@ -48,6 +51,10 @@ Flickable {
                 horizontalAlignment: wide ? Text.AlignLeft : Text.AlignHCenter
                 text: page.album ? (page.album.artist || "") + (page.album.year ? " · " + page.album.year : "") + " · " + page.tracks.length + " faixas" : ""
                 color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize
+                MouseArea {
+                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                    onClicked: if (page.album && page.album.artistId) page.openArtist(page.album.artistId)
+                }
             }
             Row {
                 spacing: 8
@@ -87,6 +94,8 @@ Flickable {
                         number: index
                         playing: modelData.id === page.playingId
                         onActivated: page.play(page.tracks, index)
+                        onMenuRequested: (t, x, y) => page.menuRequested(t, x, y)
+                        onStarToggled: (t, s) => page.starToggled(t, s)
                     }
                 }
             }

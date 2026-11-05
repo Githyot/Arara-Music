@@ -49,12 +49,21 @@ O layout do Nocturne é bom e já é GNOME de verdade: usa libadwaita (`AdwNavig
 
 Não rodei o Nocturne aqui com a mesma biblioteca. A comparação é com os 7,1 GB da sua captura, e o número exato do Nocturne depende do tamanho do seu acervo.
 
+## Feito na versão 0.2
+
+- Artistas (avatares redondos), página do artista, favoritas, tocadas recentemente e playlists (criar, renomear, excluir, adicionar e remover músicas)
+- Menu ⋮ por música: tocar a seguir, adicionar à fila, adicionar à playlist, ir para o álbum
+- Fila na tela "Tocando agora" (aba Fila), aleatório, repetir tudo/uma, volume; fila, posição e modo de repetição restaurados ao reabrir
+- MPRIS 2: aparece nos controles de mídia do GNOME e responde às teclas de mídia (testado via D-Bus: Play/Pause, SetPosition, metadados com capa)
+- Monitoramento da pasta: copiar um álbum para a pasta faz ele aparecer em ~2 s, sem rescan completo
+- Tema escuro e cor de destaque lidos do portal `org.freedesktop.appearance` e atualizados ao vivo
+- Manifesto Flatpak, arquivo .desktop, metainfo e ícone
+
 ## Próximos passos
 
-1. Página de artistas, playlists, fila editável e favoritos (as tabelas já existem).
-2. MPRIS (controle pela barra do GNOME e teclas de mídia) e integração com o portal de configurações (cor de destaque e tema em tempo real).
-3. Trocar o JSON de álbuns por um `QAbstractListModel` em Rust, para acervos com mais de 50 mil faixas.
-4. Monitorar a pasta com inotify (rescan instantâneo ao adicionar músicas).
-5. Editor de letras e envio de letras sincronizadas para o LRCLIB.
-6. Jellyfin/Subsonic (o núcleo já separa índice e fonte).
-7. Empacotamento Flatpak.
+1. Trocar o JSON de álbuns por um `QAbstractListModel` em Rust, para acervos com mais de 50 mil faixas.
+2. Editor de letras e envio de letras sincronizadas para o LRCLIB.
+3. Jellyfin/Subsonic (o núcleo já separa índice e fonte).
+4. Arrastar para reordenar fila e playlists; ordenação natural de nomes ("Artista 2" antes de "Artista 10").
+5. Ícones simbólicos do Adwaita em SVG no lugar dos caracteres Unicode.
+6. Testar o Flatpak em uma máquina com flatpak-builder (aqui não deu para rodar).

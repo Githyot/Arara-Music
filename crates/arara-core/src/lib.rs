@@ -5,6 +5,7 @@ pub mod covers;
 pub mod db;
 pub mod lyrics;
 pub mod scanner;
+pub mod watcher;
 
 use std::path::PathBuf;
 

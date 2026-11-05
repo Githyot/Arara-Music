@@ -14,6 +14,12 @@ fn main() {
         "qml/ui/PlayerBar.qml",
         "qml/ui/NowPlaying.qml",
         "qml/ui/LyricsView.qml",
+        "qml/ui/Sidebar.qml",
+        "qml/ui/ArtistGrid.qml",
+        "qml/ui/TrackListPage.qml",
+        "qml/ui/TrackMenu.qml",
+        "qml/ui/TextPrompt.qml",
+        "qml/ui/QueueView.qml",
     ]))
     // Theme singleton lives in its own tiny module so every file can `import AraraStyle`.
     .qrc("style.qrc")

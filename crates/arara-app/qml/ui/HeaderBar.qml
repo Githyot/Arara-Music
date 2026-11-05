@@ -64,7 +64,6 @@ Rectangle {
         FlatButton {
             icon: "close"; circular: true; size: 24
             color: hovered ? Theme.pressed : Theme.hover
-            property bool hovered: false
             onClicked: bar.window.close()
         }
     }

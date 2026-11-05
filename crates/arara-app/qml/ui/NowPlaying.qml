@@ -8,8 +8,13 @@ Rectangle {
     property var lyrics: ({ kind: "none" })
     property bool loadingLyrics: false
     property real position: 0
+    property var queue: []
+    property int queueIndex: -1
+    property string tab: "lyrics"
     signal seek(real ms)
     signal close()
+    signal jump(int index)
+    signal removeAt(int index)
 
     color: Theme.windowBg
     readonly property bool wide: width > 820
@@ -49,15 +54,49 @@ Rectangle {
         }
     }
 
-    LyricsView {
+    Item {
+        id: right
         x: np.wide ? left.width : 0
         y: np.wide ? 0 : left.height
         width: np.wide ? parent.width - left.width : parent.width
         height: np.wide ? parent.height : parent.height - left.height
-        lyrics: np.lyrics
-        loading: np.loadingLyrics
-        position: np.position
-        onSeek: (ms) => np.seek(ms)
+
+        // AdwViewSwitcher-like toggle
+        Rectangle {
+            id: switcher
+            anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 12 }
+            width: 220; height: 34; radius: Theme.radius; color: Theme.hover
+            Row {
+                anchors.fill: parent; anchors.margins: 3
+                Repeater {
+                    model: [{ k: "lyrics", t: "Letra" }, { k: "queue", t: "Fila" }]
+                    Rectangle {
+                        required property var modelData
+                        width: (switcher.width - 6) / 2; height: switcher.height - 6; radius: Theme.radius - 2
+                        color: np.tab === modelData.k ? (Theme.dark ? Qt.rgba(1, 1, 1, 0.15) : "#ffffff") : "transparent"
+                        Text { anchors.centerIn: parent; text: modelData.t; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize; font.weight: Font.DemiBold }
+                        MouseArea { anchors.fill: parent; onClicked: np.tab = modelData.k }
+                    }
+                }
+            }
+        }
+
+        LyricsView {
+            anchors { left: parent.left; right: parent.right; top: switcher.bottom; bottom: parent.bottom; topMargin: 6 }
+            visible: np.tab === "lyrics"
+            lyrics: np.lyrics
+            loading: np.loadingLyrics
+            position: np.position
+            onSeek: (ms) => np.seek(ms)
+        }
+        QueueView {
+            anchors { left: parent.left; right: parent.right; top: switcher.bottom; bottom: parent.bottom; topMargin: 6 }
+            visible: np.tab === "queue"
+            queue: np.queue
+            current: np.queueIndex
+            onJump: (i) => np.jump(i)
+            onRemoveAt: (i) => np.removeAt(i)
+        }
     }
 
     FlatButton { anchors { right: parent.right; top: parent.top; margins: 12 } icon: "close"; circular: true; onClicked: np.close() }

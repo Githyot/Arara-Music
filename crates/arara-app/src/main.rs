@@ -1,4 +1,5 @@
 mod bridge;
+mod desktop;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 

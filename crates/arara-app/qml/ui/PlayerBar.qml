@@ -9,7 +9,13 @@ Rectangle {
     property bool playing: false
     property real position: 0
     property real duration: 0
+    property bool shuffle: false
+    property string repeat: "off"   // off | all | one
+    property real volume: 1.0
     signal toggle()
+    signal toggleShuffle()
+    signal cycleRepeat()
+    signal volumeMoved(real v)
     signal next()
     signal prev()
     signal seek(real ms)
@@ -58,9 +64,11 @@ Rectangle {
     Row {
         anchors.centerIn: parent
         spacing: 8
+        FlatButton { icon: "shuffle"; circular: true; checked: bar.shuffle; visible: bar.width > 560; onClicked: bar.toggleShuffle() }
         FlatButton { icon: "prev"; circular: true; onClicked: bar.prev() }
         FlatButton { icon: bar.playing ? "pause" : "play"; circular: true; suggested: true; size: 40; onClicked: bar.toggle() }
         FlatButton { icon: "next"; circular: true; onClicked: bar.next() }
+        FlatButton { icon: bar.repeat === "one" ? "repeat1" : "repeat"; circular: true; checked: bar.repeat !== "off"; visible: bar.width > 560; onClicked: bar.cycleRepeat() }
     }
 
     Row {
@@ -71,6 +79,22 @@ Rectangle {
             text: fmt(bar.position) + " / " + fmt(bar.duration)
             color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1
             function fmt(ms) { var s = Math.floor(ms / 1000); return Math.floor(s / 60) + ":" + ("0" + s % 60).slice(-2) }
+        }
+        Slider {
+            id: vol
+            visible: bar.width > 860
+            anchors.verticalCenter: parent.verticalCenter
+            width: 90; height: 20
+            from: 0; to: 1; value: bar.volume
+            onMoved: bar.volumeMoved(value)
+            background: Rectangle {
+                y: vol.height / 2 - 2; width: vol.width; height: 4; radius: 2; color: Theme.hover
+                Rectangle { width: vol.visualPosition * parent.width; height: parent.height; radius: 2; color: Theme.fg; opacity: 0.7 }
+            }
+            handle: Rectangle {
+                x: vol.visualPosition * (vol.width - width); y: vol.height / 2 - height / 2
+                width: 14; height: 14; radius: 7; color: "white"; border.color: Theme.border
+            }
         }
         FlatButton { icon: "lyrics"; onClicked: bar.expand() }
     }

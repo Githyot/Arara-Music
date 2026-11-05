@@ -6,7 +6,11 @@ Player de música para Linux em **Rust + Qt/QML**, com visual inspirado no GNOME
 - Capas em cache no disco (uma por álbum), carregadas só quando aparecem na tela
 - Letras sincronizadas com **modo karaokê** palavra por palavra (arquivos `.lrc`, tags embutidas e [LRCLIB](https://lrclib.net))
 - Busca instantânea (FTS5, ignora acentos)
-- Tema claro e escuro seguindo o GNOME
+- Álbuns, artistas, favoritas, recentes e playlists
+- Fila com "tocar a seguir", aleatório e repetir; a fila e a posição voltam quando você reabre o app
+- Teclas de mídia e controles de mídia do GNOME (MPRIS)
+- Novas músicas na pasta aparecem sozinhas (monitoramento com inotify)
+- Tema claro/escuro e cor de destaque do GNOME, ao vivo (portal de configurações)
 
 Veja a análise e as medições em [docs/ANALISE.md](docs/ANALISE.md).
 
@@ -38,6 +42,20 @@ cargo build --release
 ```
 
 Variáveis úteis: `ARARA_LIBRARY=/caminho` (pasta da biblioteca), `ARARA_DARK=1`, `ARARA_OFFLINE=1` (não consulta o LRCLIB) e `--ssd` (usa a barra de título do sistema em vez da própria).
+
+## Flatpak
+
+```sh
+# gera as fontes offline do Cargo (uma vez, e sempre que o Cargo.lock mudar)
+curl -LO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
+python3 flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
+flatpak-builder --user --install --force-clean build build-aux/io.github.Githyot.AraraMusic.yml
+flatpak run io.github.Githyot.AraraMusic
+```
+
+## Atalhos
+
+Espaço tocar/pausar · Ctrl+→/← próxima/anterior · Ctrl+F buscar · Ctrl+L letra · Esc voltar · Ctrl+Q sair
 
 ## Linha de comando
 

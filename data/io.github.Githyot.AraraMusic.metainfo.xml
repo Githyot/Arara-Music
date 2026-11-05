@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.Githyot.AraraMusic</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Arara Music</name>
+  <summary>Fast music player with synced karaoke lyrics</summary>
+  <summary xml:lang="pt_BR">Player de música rápido com letras sincronizadas em modo karaokê</summary>
+  <description>
+    <p>Arara Music opens instantly and stays light even with large libraries. It keeps an index of your music, caches album art on disk and fetches synced lyrics from LRCLIB.</p>
+    <p xml:lang="pt_BR">O Arara Music abre na hora e continua leve mesmo com bibliotecas grandes. Ele mantém um índice das suas músicas, guarda as capas em cache no disco e busca letras sincronizadas no LRCLIB.</p>
+    <ul>
+      <li>Albums, artists, favourites, recently played and playlists</li>
+      <li>Word-by-word karaoke lyrics (LRC, enhanced LRC, embedded tags, LRCLIB)</li>
+      <li>Media keys and GNOME media controls (MPRIS)</li>
+      <li>Follows the system dark style and accent color</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.Githyot.AraraMusic.desktop</launchable>
+  <url type="homepage">https://github.com/Githyot/arara-music</url>
+  <developer id="io.github.githyot"><name>HP</name></developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-11-05"/>
+    <release version="0.1.0" date="2026-11-05"/>
+  </releases>
+</component>

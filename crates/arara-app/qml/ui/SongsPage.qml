@@ -8,6 +8,8 @@ Item {
     property string query: ""
     property int playingId: -1
     signal play(var tracks, int index)
+    signal menuRequested(var track, real x, real y)
+    signal starToggled(var track, bool starred)
 
     ListView {
         id: lv
@@ -32,6 +34,8 @@ Item {
                     track: modelData; number: index; showArt: true
                     playing: modelData.id === page.playingId
                     onActivated: page.play(page.results, index)
+                    onMenuRequested: (t, x, y) => page.menuRequested(t, x, y)
+                    onStarToggled: (t, s) => page.starToggled(t, s)
                 }
             }
         }

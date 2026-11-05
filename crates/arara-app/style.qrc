@@ -2,5 +2,6 @@
   <qresource prefix="/qt/qml/AraraStyle">
     <file alias="qmldir">qml/style/qmldir</file>
     <file alias="Theme.qml">qml/style/Theme.qml</file>
+    <file alias="circle.frag.qsb">qml/style/circle.frag.qsb</file>
   </qresource>
 </RCC>

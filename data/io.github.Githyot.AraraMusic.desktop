@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Arara Music
+GenericName=Player de música
+Comment=Ouça sua biblioteca com letras sincronizadas
+Exec=arara-music %U
+Icon=io.github.Githyot.AraraMusic
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;Qt;
+Keywords=music;player;lyrics;karaoke;música;letra;
+MimeType=audio/mpeg;audio/flac;audio/ogg;audio/opus;audio/mp4;audio/x-wav;
+StartupNotify=true
+StartupWMClass=arara-music
