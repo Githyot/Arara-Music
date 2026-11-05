@@ -62,6 +62,31 @@ struct Parsed {
     cover_hash: Option<String>,
 }
 
+/// Which albums already have (or are getting) a cover, shared by the parser threads.
+pub struct CoverClaims {
+    albums: std::sync::Mutex<HashSet<(String, String)>>,
+    dirs: std::sync::Mutex<HashSet<PathBuf>>,
+}
+
+impl CoverClaims {
+    fn new(existing: HashSet<(String, String)>) -> Self {
+        Self { albums: std::sync::Mutex::new(existing), dirs: Default::default() }
+    }
+    fn key(album: &str, artist: &str) -> (String, String) {
+        let aa = if artist.is_empty() { "Artista desconhecido" } else { artist };
+        (album.to_string(), aa.to_string())
+    }
+    fn has(&self, album: &str, artist: &str) -> bool {
+        self.albums.lock().unwrap().contains(&Self::key(album, artist))
+    }
+    fn claim(&self, album: &str, artist: &str) -> bool {
+        self.albums.lock().unwrap().insert(Self::key(album, artist))
+    }
+    fn first_visit(&self, dir: &Path) -> bool {
+        self.dirs.lock().unwrap().insert(dir.to_path_buf())
+    }
+}
+
 fn is_audio(p: &Path) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
@@ -88,7 +113,7 @@ fn parse_file(
     path: &Path,
     mtime: i64,
     size: i64,
-    claim_cover: &(dyn Fn(&str, &str) -> bool + Sync),
+    claims: &CoverClaims,
     covers: &CoverCache,
 ) -> Option<Parsed> {
     let tagged = lofty::read_from_path(path).ok()?;
@@ -109,12 +134,20 @@ fn parse_file(
                     .map(str::to_owned)
                     .unwrap_or_else(|| artist.clone());
                 let album_s = t.album().map(|s| s.into_owned()).unwrap_or_default();
-                // Only the first worker to see an album decodes its art; everyone else
-                // skips it, so at most one picture per album is ever in memory.
-                let picture = if !album_s.is_empty() && claim_cover(&album_s, &album_artist) {
-                    let bytes = t.pictures().first().map(|p| p.data().to_vec()).or_else(|| {
-                        folder_cover(path.parent()?).and_then(|f| std::fs::read(f).ok())
-                    });
+                // Only the first track *that has art* claims its album; the rest skip
+                // it, so at most one picture per album is ever decoded. Tracks without
+                // embedded art fall back to folder art, checked once per directory.
+                let picture = if !album_s.is_empty() && !claims.has(&album_s, &album_artist) {
+                    let bytes = match t.pictures().first() {
+                        Some(pic) if claims.claim(&album_s, &album_artist) => Some(pic.data().to_vec()),
+                        Some(_) => None,
+                        None => path
+                            .parent()
+                            .filter(|d| claims.first_visit(d))
+                            .and_then(folder_cover)
+                            .filter(|_| claims.claim(&album_s, &album_artist))
+                            .and_then(|f| std::fs::read(f).ok()),
+                    };
                     bytes.and_then(|b| covers.store(&b).ok())
                 } else {
                     None
@@ -218,18 +251,14 @@ pub fn scan(
     // 2. Parse in parallel, write in batches from this thread.
     let total = to_parse.len();
     let (tx, rx) = crossbeam_channel::bounded::<Option<Parsed>>(64);
-    let claimed = std::sync::Mutex::new(albums_with_cover);
-    let claim = |album: &str, artist: &str| -> bool {
-        let aa = if artist.is_empty() { "Artista desconhecido" } else { artist };
-        claimed.lock().unwrap().insert((album.to_string(), aa.to_string()))
-    };
+    let claims = CoverClaims::new(albums_with_cover);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
 
     std::thread::scope(|s| -> Result<()> {
-        let claim = &claim;
+        let claims = &claims;
         s.spawn(move || {
             to_parse.par_iter().for_each_with(tx, |tx, (p, m, sz)| {
-                let parsed = parse_file(p, *m, *sz, claim, covers);
+                let parsed = parse_file(p, *m, *sz, claims, covers);
                 let _ = tx.send(parsed);
             });
         });
