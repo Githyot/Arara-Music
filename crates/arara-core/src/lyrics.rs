@@ -267,6 +267,86 @@ impl LrclibClient {
     }
 }
 
+// ---------------- writing LRC & publishing ----------------
+
+pub fn format_ts(ms: u64) -> String {
+    format!("{:02}:{:02}.{:02}", ms / 60_000, (ms / 1000) % 60, (ms % 1000) / 10)
+}
+
+/// Build line-synced LRC from (start_ms, text) pairs.
+pub fn to_lrc(lines: &[(u64, String)]) -> String {
+    let mut out = String::new();
+    for (t, text) in lines {
+        out.push_str(&format!("[{}]{}\n", format_ts(*t), text));
+    }
+    out
+}
+
+/// Strip timestamps, keeping only the words (LRCLIB wants both forms).
+pub fn lrc_to_plain(lrc: &str) -> String {
+    parse_lrc(lrc, None).into_iter().map(|l| l.text).collect::<Vec<_>>().join("\n")
+}
+
+/// LRCLIB's anti-spam proof of work: find `nonce` with sha256(prefix+nonce) <= target.
+pub fn solve_challenge(prefix: &str, target_hex: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let target: Vec<u8> = (0..target_hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&target_hex[i..i + 2], 16))
+        .collect::<std::result::Result<_, _>>()
+        .ok()?;
+    for nonce in 0u64.. {
+        let n = nonce.to_string();
+        let mut h = Sha256::new();
+        h.update(prefix.as_bytes());
+        h.update(n.as_bytes());
+        if h.finalize().as_slice() <= target.as_slice() {
+            return Some(n);
+        }
+        if nonce > 500_000_000 {
+            return None;
+        }
+    }
+    None
+}
+
+#[derive(Debug, Deserialize)]
+struct Challenge {
+    prefix: String,
+    target: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishRequest {
+    pub track_name: String,
+    pub artist_name: String,
+    pub album_name: String,
+    pub duration: u64,
+    pub plain_lyrics: String,
+    pub synced_lyrics: String,
+}
+
+impl LrclibClient {
+    /// Publish lyrics to LRCLIB (takes a few seconds: solves the proof-of-work challenge).
+    pub fn publish(&self, req: &PublishRequest) -> std::result::Result<(), String> {
+        let ch: Challenge = self
+            .agent
+            .post(&format!("{LRCLIB}/request-challenge"))
+            .call()
+            .map_err(|e| e.to_string())?
+            .into_json()
+            .map_err(|e| e.to_string())?;
+        let nonce = solve_challenge(&ch.prefix, &ch.target).ok_or("desafio sem solução")?;
+        self.agent
+            .post(&format!("{LRCLIB}/publish"))
+            .set("X-Publish-Token", &format!("{}:{}", ch.prefix, nonce))
+            .send_json(req)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
 // ---------------- resolver ----------------
 
 fn now() -> i64 {
@@ -352,6 +432,25 @@ pub fn resolve(db: &Db, client: Option<&LrclibClient>, track_id: i64) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_and_rereads_lrc() {
+        let lrc = to_lrc(&[(1_230, "Olá".into()), (65_400, "mundo".into())]);
+        assert_eq!(lrc, "[00:01.23]Olá\n[01:05.40]mundo\n");
+        let l = parse_lrc(&lrc, None);
+        assert_eq!((l[1].start_ms, l[1].text.as_str()), (65_400, "mundo"));
+        assert_eq!(lrc_to_plain(&lrc), "Olá\nmundo");
+    }
+
+    #[test]
+    fn proof_of_work() {
+        use sha2::{Digest, Sha256};
+        // easy target: first byte must be 0x0f or lower (~1/16 chance per try)
+        let target = format!("0f{}", "ff".repeat(31));
+        let n = solve_challenge("arara", &target).unwrap();
+        let h = Sha256::digest(format!("arara{n}").as_bytes());
+        assert!(h[0] <= 0x0f);
+    }
 
     #[test]
     fn timestamps() {

@@ -132,6 +132,20 @@ pub mod qobject {
         #[cxx_name = "mprisPosition"]
         fn mpris_position(self: &Library, ms: i64, seeked: bool);
 
+        /// Store user-edited lyrics. `synced` = text is LRC. `sidecar` = also write song.lrc/.txt next to the file.
+        #[qinvokable]
+        #[cxx_name = "saveLyrics"]
+        fn save_lyrics(self: Pin<&mut Library>, track_id: i64, text: &QString, synced: bool, sidecar: bool);
+
+        /// Upload the stored lyrics of a track to LRCLIB; answers with `lyricsPublished`.
+        #[qinvokable]
+        #[cxx_name = "publishLyrics"]
+        fn publish_lyrics(self: Pin<&mut Library>, track_id: i64);
+
+        #[qsignal]
+        #[cxx_name = "lyricsPublished"]
+        fn lyrics_published(self: Pin<&mut Library>, track_id: i64, ok: bool, message: QString);
+
         #[qsignal]
         #[cxx_name = "libraryChanged"]
         fn library_changed(self: Pin<&mut Library>);
@@ -229,6 +243,21 @@ fn default_music_dir() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("{}/Music", std::env::var("HOME").unwrap_or_default()))
+}
+
+fn lyrics_to_json(res: lyrics::Lyrics) -> String {
+    match res {
+        lyrics::Lyrics::Synced(lines) => json!({
+            "kind": "synced",
+            "lines": lines.iter().map(|l| json!({
+                "t": l.start_ms, "e": l.end_ms, "text": l.text, "ws": l.word_synced,
+                "w": l.words.iter().map(|w| json!([w.start_ms, w.end_ms, w.text])).collect::<Vec<_>>()
+            })).collect::<Vec<_>>()
+        }),
+        lyrics::Lyrics::Plain(p) => json!({ "kind": "plain", "text": p }),
+        lyrics::Lyrics::None => json!({ "kind": "none" }),
+    }
+    .to_string()
 }
 
 fn now() -> i64 {
@@ -563,19 +592,60 @@ impl qobject::Library {
                 .ok()
                 .and_then(|db| lyrics::resolve(&db, client.as_ref(), track_id).ok())
                 .unwrap_or(lyrics::Lyrics::None);
-            let v = match res {
-                lyrics::Lyrics::Synced(lines) => json!({
-                    "kind": "synced",
-                    "lines": lines.iter().map(|l| json!({
-                        "t": l.start_ms, "e": l.end_ms, "text": l.text, "ws": l.word_synced,
-                        "w": l.words.iter().map(|w| json!([w.start_ms, w.end_ms, w.text])).collect::<Vec<_>>()
-                    })).collect::<Vec<_>>()
-                }),
-                lyrics::Lyrics::Plain(p) => json!({ "kind": "plain", "text": p }),
-                lyrics::Lyrics::None => json!({ "kind": "none" }),
-            };
-            let s = v.to_string();
+            let s = lyrics_to_json(res);
             let _ = qt.queue(move |o| o.lyrics_ready(track_id, qs(&s)));
+        });
+    }
+
+    pub fn save_lyrics(mut self: Pin<&mut Self>, track_id: i64, text: &QString, synced: bool, sidecar: bool) {
+        let text = text.to_string();
+        let Some(db) = &self.db else { return };
+        let (s, p) = if synced { (Some(text.as_str()), None) } else { (None, Some(text.as_str())) };
+        let _ = db.store_lyrics(track_id, "user", s, p, now());
+        if sidecar {
+            if let Ok(Some(t)) = db.track(track_id) {
+                let ext = if synced { "lrc" } else { "txt" };
+                if let Err(e) = std::fs::write(std::path::Path::new(&t.path).with_extension(ext), &text) {
+                    log::warn!("could not write sidecar lyrics: {e}");
+                }
+            }
+        }
+        let dur = db.track(track_id).ok().flatten().map(|t| t.duration_ms as u64);
+        let res = if synced {
+            lyrics::Lyrics::Synced(lyrics::parse_lrc(&text, dur))
+        } else if text.trim().is_empty() {
+            lyrics::Lyrics::None
+        } else {
+            lyrics::Lyrics::Plain(text.clone())
+        };
+        let json = lyrics_to_json(res);
+        self.as_mut().lyrics_ready(track_id, qs(&json));
+    }
+
+    pub fn publish_lyrics(self: Pin<&mut Self>, track_id: i64) {
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(), String> {
+                let db = Db::open(&db_path).map_err(|e| e.to_string())?;
+                let t = db.track(track_id).map_err(|e| e.to_string())?.ok_or("faixa não encontrada")?;
+                let (_, synced, plain) = db.cached_lyrics(track_id).map_err(|e| e.to_string())?.ok_or("sem letra salva")?;
+                let synced = synced.unwrap_or_default();
+                let plain = plain.unwrap_or_else(|| lyrics::lrc_to_plain(&synced));
+                lyrics::LrclibClient::default().publish(&lyrics::PublishRequest {
+                    track_name: t.title,
+                    artist_name: t.artist,
+                    album_name: t.album.unwrap_or_default(),
+                    duration: (t.duration_ms as u64 + 500) / 1000,
+                    plain_lyrics: plain,
+                    synced_lyrics: synced,
+                })
+            })();
+            let (ok, msg) = match result {
+                Ok(()) => (true, "Letra enviada ao LRCLIB. Obrigado!".to_string()),
+                Err(e) => (false, format!("Não foi possível enviar: {e}")),
+            };
+            let _ = qt.queue(move |o| o.lyrics_published(track_id, ok, qs(&msg)));
         });
     }
 

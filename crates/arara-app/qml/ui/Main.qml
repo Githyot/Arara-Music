@@ -401,12 +401,14 @@ Window {
             onJump: (i) => player.jump(i)
             onRemoveAt: (i) => player.removeAt(i)
             onMoveItem: (f, t) => player.move(f, t)
+            onEditLyrics: lyricsEditor.openWith(player.current, nowPlaying.lyrics)
             MouseArea { anchors { left: parent.left; right: parent.right; top: parent.top } height: Theme.headerHeight; z: -1; onPressed: win.startSystemMove() }
         }
 
         // AdwToast
         Rectangle {
             id: toast
+            z: 100
             property string text: ""
             function show(t) { text = t; opacity = 1; toastTimer.restart() }
             anchors { horizontalCenter: parent.horizontalCenter; bottom: playerBar.top; bottomMargin: 16 }
@@ -417,6 +419,29 @@ Window {
             Text { id: toastText; anchors.centerIn: parent; text: toast.text; color: Theme.dark ? "#1d1d20" : "#ffffff"; font.family: Theme.font; font.pointSize: Theme.fontSize }
             Timer { id: toastTimer; interval: 2600; onTriggered: toast.opacity = 0 }
         }
+    }
+
+    LyricsEditor {
+        id: lyricsEditor
+        parent: frame
+        anchors.fill: parent
+        anchors.bottomMargin: playerBar.height
+        z: 50
+        visible: false
+        position: media.position
+        playing: media.playbackState === MediaPlayer.PlayingState
+        onSeek: (ms) => player.seekTo(ms)
+        onTogglePlay: playerBar.toggle()
+        onSave: (text, synced, sidecar) => {
+            library.saveLyrics(track.id, text, synced, sidecar)
+            toast.show(synced ? "Letra sincronizada salva" : "Letra salva")
+        }
+        onPublish: library.publishLyrics(track.id)
+        onClose: visible = false
+    }
+    Connections {
+        target: library
+        function onLyricsPublished(trackId, ok, message) { lyricsEditor.publishing = false; toast.show(message) }
     }
 
     TrackMenu {
@@ -461,11 +486,11 @@ Window {
 
     onClosing: player.save()
 
-    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible; onActivated: playerBar.toggle() }
+    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible; onActivated: playerBar.toggle() }
     Shortcut { sequence: "Ctrl+F"; onActivated: nav.go("songs") }
     Shortcut { sequence: "Ctrl+Right"; onActivated: player.next() }
     Shortcut { sequence: "Ctrl+Left"; onActivated: player.prev() }
     Shortcut { sequence: "Ctrl+L"; onActivated: nowPlaying.visible = !nowPlaying.visible }
-    Shortcut { sequence: "Escape"; onActivated: { if (nowPlaying.visible) nowPlaying.visible = false; else if (nav.history.length) nav.back() } }
+    Shortcut { sequence: "Escape"; onActivated: { if (lyricsEditor.visible) lyricsEditor.visible = false; else if (nowPlaying.visible) nowPlaying.visible = false; else if (nav.history.length) nav.back() } }
     Shortcut { sequence: "Ctrl+Q"; onActivated: win.close() }
 }

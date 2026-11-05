@@ -16,6 +16,7 @@ Rectangle {
     signal jump(int index)
     signal removeAt(int index)
     signal moveItem(int from, int to)
+    signal editLyrics()
 
     color: Theme.windowBg
     readonly property bool wide: width > 820
@@ -89,6 +90,13 @@ Rectangle {
             loading: np.loadingLyrics
             position: np.position
             onSeek: (ms) => np.seek(ms)
+            onAddLyrics: np.editLyrics()
+        }
+        FlatButton {
+            anchors { left: switcher.right; leftMargin: 8; verticalCenter: switcher.verticalCenter }
+            visible: np.tab === "lyrics" && np.track !== null
+            icon: "edit"; circular: true
+            onClicked: np.editLyrics()
         }
         QueueView {
             anchors { left: parent.left; right: parent.right; top: switcher.bottom; bottom: parent.bottom; topMargin: 6 }

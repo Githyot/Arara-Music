@@ -91,7 +91,15 @@ Item {
         }
     }
 
+    signal addLyrics()
+    FlatButton {
+        anchors { horizontalCenter: parent.horizontalCenter; top: noneText.bottom; topMargin: 14 }
+        visible: view.lyrics.kind === "none" && !view.loading
+        text: "Adicionar letra"; color: Theme.hover
+        onClicked: view.addLyrics()
+    }
     Text {
+        id: noneText
         anchors.centerIn: parent
         visible: view.lyrics.kind === "none"
         text: view.loading ? "Buscando letra…" : "Sem letra para esta música"
