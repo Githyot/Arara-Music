@@ -82,9 +82,30 @@ Não rodei o Nocturne aqui com a mesma biblioteca. A comparação é com os 7,1 
 
 Servidor remoto simulado (`tools/mock_server.py`, API do Jellyfin) com 17.884 faixas e 1.910 capas: primeira sincronização em 3,0 s, sincronizações seguintes sem mudanças em 0,2 s.
 
+## Feito na versão 0.4
+
+**Apple Music e YouTube Music.** Tocar as músicas desses serviços dentro do Arara não é viável de forma limpa: o Apple Music entrega o áudio com DRM (só toca nos apps da Apple ou num navegador com Widevine, o que exigiria embutir um Chromium) e o YouTube Music não tem API, só extração por engenharia reversa, contra os termos de uso. O que foi feito é trazer a *coleção*: o Arara lê a exportação da biblioteca do Apple Music (`Library.xml`), o Google Takeout do YouTube Music e CSVs de Exportify/TuneMyMusic/Soundiiz/M3U/XSPF, procura cada música na biblioteca (locais e servidores) ignorando acentos, "(Remastered)", "[Official Video]", "feat." e escolhendo a versão de duração mais próxima, cria as playlists, marca as curtidas como favoritas e lista o que falta. Reimportar substitui a playlist em vez de duplicar.
+
+**Auditoria de bugs e o que foi corrigido:**
+
+| Problema encontrado | Correção |
+|---|---|
+| Em janelas estreitas (< 620 px) a barra lateral sumia e não havia como navegar | Botão de barra lateral no cabeçalho, que abre a barra por cima do conteúdo |
+| Grade de álbuns ficava com uma coluna só em telas estreitas | Mínimo de duas colunas, capas encolhem |
+| Títulos das músicas cortados cedo em janelas estreitas | Largura do texto calculada pelo espaço livre |
+| Botão "voltar" aparecia em páginas de primeiro nível (playlist, servidor) | Só aparece quando há para onde voltar |
+| Álbum aberto a partir de um servidor destacava "Álbuns" na barra lateral | A barra lateral destaca a seção de origem |
+| Música que não abre (arquivo apagado, servidor fora do ar) parava tudo em silêncio | Aviso na tela e pula para a próxima (no máximo 3 seguidas) |
+| Volume voltava a 100% a cada abertura | Volume salvo |
+| ReplayGain era lido das tags mas nunca aplicado | Aplicado (faixa, ou álbum quando a faixa não tem), com opção no menu |
+| Não havia como trocar a pasta de músicas | Menu principal: pasta de músicas, reindexar, importar, atalhos, sobre |
+| Remover um servidor deixava as músicas dele na fila | Saem da fila também |
+| Diálogo de arquivo do Qt é estranho ao GNOME | Usa o seletor nativo do GNOME pelo portal (funciona no Flatpak); o do Qt fica só de reserva |
+
 ## Próximos passos
 
-1. Guardar os tokens dos servidores no chaveiro do GNOME (Secret Service) em vez do banco.
-2. Cache de áudio para ouvir músicas do servidor offline, e transcodificação opcional para conexões lentas.
-3. Testar com Navidrome e Jellyfin de verdade (aqui foi usado um servidor simulado, porque a rede desta máquina só alcança o próprio computador).
-4. Testar o Flatpak em uma máquina com flatpak-builder (aqui não deu para rodar).
+1. Equalizador, temporizador para dormir e transição sem pausa (gapless).
+2. Guardar os tokens dos servidores no chaveiro do GNOME (Secret Service) em vez do banco.
+3. Cache de áudio para ouvir músicas do servidor offline, e transcodificação opcional para conexões lentas.
+4. Testar com Navidrome e Jellyfin de verdade (aqui foi usado um servidor simulado, porque a rede desta máquina só alcança o próprio computador).
+5. Testar o Flatpak em uma máquina com flatpak-builder (aqui não deu para rodar).

@@ -147,6 +147,44 @@ pub mod qobject {
         #[cxx_name = "lyricsPublished"]
         fn lyrics_published(self: Pin<&mut Library>, track_id: i64, ok: bool, message: QString);
 
+        /// Small persistent preferences (volume, ReplayGain mode…).
+        #[qinvokable]
+        #[cxx_name = "setting"]
+        fn setting(self: &Library, key: &QString, fallback: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "setSetting"]
+        fn set_setting(self: &Library, key: &QString, value: &QString);
+
+        /// Switch the library folder: rescan it and watch it from now on.
+        #[qinvokable]
+        #[cxx_name = "changeLibraryDir"]
+        fn set_library_dir_and_scan(self: Pin<&mut Library>, dir: &QString);
+
+        /// Import playlists/likes from an export file or folder (Apple Music, YouTube Music, CSV, M3U…).
+        /// Runs in the background and answers with importFinished(report JSON).
+        #[qinvokable]
+        #[cxx_name = "importPath"]
+        fn import_path(self: Pin<&mut Library>, path: &QString);
+
+        #[qsignal]
+        #[cxx_name = "importFinished"]
+        fn import_finished(self: Pin<&mut Library>, report: QString);
+
+        /// Opens the native (portal) file or folder chooser. Answers with pathPicked,
+        /// or pickerUnavailable when there's no portal (QML then shows Qt's dialog).
+        #[qinvokable]
+        #[cxx_name = "pickPath"]
+        fn pick_path(self: Pin<&mut Library>, purpose: &QString, title: &QString, directory: bool);
+
+        #[qsignal]
+        #[cxx_name = "pathPicked"]
+        fn path_picked(self: Pin<&mut Library>, purpose: QString, path: QString);
+
+        #[qsignal]
+        #[cxx_name = "pickerUnavailable"]
+        fn picker_unavailable(self: Pin<&mut Library>, purpose: QString, directory: bool);
+
         /// Remote servers (Subsonic/Navidrome, Jellyfin) as JSON.
         #[qinvokable]
         #[cxx_name = "serversJson"]
@@ -201,7 +239,7 @@ pub mod qobject {
 }
 
 use crate::desktop::{self, Command, Mpris, TrackMeta};
-use arara_core::{covers::CoverCache, db::Db, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
+use arara_core::{covers::CoverCache, db::Db, import, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
 use core::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
@@ -472,6 +510,7 @@ impl qobject::Library {
             "id": t.id, "title": t.title, "artist": t.artist, "album": t.album,
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
             "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
+            "gain": t.track_gain, "albumGain": t.album_gain,
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
@@ -848,6 +887,80 @@ impl qobject::Library {
                 }
                 o.as_mut().servers_changed();
                 o.as_mut().sync_next();
+            });
+        });
+    }
+}
+
+// ---------- preferences ----------
+impl qobject::Library {
+    pub fn setting(&self, key: &QString, fallback: &QString) -> QString {
+        let v = self.db.as_ref().and_then(|d| d.get_kv(&format!("pref:{key}")).ok().flatten());
+        v.map(|s| qs(&s)).unwrap_or_else(|| fallback.clone())
+    }
+
+    pub fn set_setting(&self, key: &QString, value: &QString) {
+        if let Some(d) = &self.db {
+            let _ = d.set_kv(&format!("pref:{key}"), &value.to_string());
+        }
+    }
+
+    pub fn set_library_dir_and_scan(mut self: Pin<&mut Self>, dir: &QString) {
+        let d = dir.to_string();
+        let d = d.strip_prefix("file://").unwrap_or(&d).to_string();
+        if d.is_empty() || !std::path::Path::new(&d).is_dir() {
+            self.as_mut().set_status(qs("Pasta inválida"));
+            return;
+        }
+        self.as_mut().start_scan(&qs(&d));
+        self.as_mut().start_watching(&d);
+    }
+}
+
+// ---------- import from streaming services ----------
+impl qobject::Library {
+    pub fn import_path(self: Pin<&mut Self>, path: &QString) {
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        let p = path.to_string();
+        let p = PathBuf::from(p.strip_prefix("file://").unwrap_or(&p));
+        std::thread::spawn(move || {
+            let out = (|| -> Result<import::Report, String> {
+                let pls = import::read_path(&p)?;
+                if pls.is_empty() {
+                    return Err("nenhuma playlist reconhecida nesse arquivo ou pasta".into());
+                }
+                let db = Db::open(&db_path).map_err(|e| e.to_string())?;
+                import::apply(&db, &pls).map_err(|e| e.to_string())
+            })();
+            let json = match out {
+                Ok(r) => serde_json::to_value(&r).map(|mut v| { v["ok"] = true.into(); v }).unwrap_or_default().to_string(),
+                Err(e) => json!({ "ok": false, "error": e }).to_string(),
+            };
+            let _ = qt.queue(move |mut o| {
+                o.as_mut().playlists_changed();
+                o.as_mut().library_changed();
+                o.as_mut().import_finished(qs(&json));
+            });
+        });
+    }
+}
+
+impl qobject::Library {
+    pub fn pick_path(self: Pin<&mut Self>, purpose: &QString, title: &QString, directory: bool) {
+        let qt = self.qt_thread();
+        let (purpose, title) = (purpose.to_string(), title.to_string());
+        std::thread::spawn(move || {
+            const EXPORTS: &[&str] = &["*.xml", "*.csv", "*.json", "*.m3u", "*.m3u8", "*.xspf"];
+            let filters: &[(&str, &[&str])] = if directory { &[] } else { &[("Exportações de playlists", EXPORTS), ("Todos os arquivos", &["*"])] };
+            let res = desktop::portal_pick(&title, directory, filters);
+            let _ = qt.queue(move |mut o| match res {
+                Ok(Some(p)) => o.as_mut().path_picked(qs(&purpose), qs(&p)),
+                Ok(None) => {}
+                Err(e) => {
+                    log::info!("file chooser portal unavailable ({e}); using Qt's dialog");
+                    o.as_mut().picker_unavailable(qs(&purpose), directory)
+                }
             });
         });
     }

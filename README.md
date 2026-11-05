@@ -13,6 +13,8 @@ Player de música para Linux em **Rust + Qt/QML**, com visual inspirado no GNOME
 - Tema claro/escuro e cor de destaque do GNOME, ao vivo (portal de configurações)
 - Editor de letras: sincronize tocando a música e apertando Enter em cada verso, salve como `.lrc` e envie ao LRCLIB
 - Servidores **Navidrome/Subsonic** e **Jellyfin** junto com as músicas locais; o catálogo fica em cache e abre na hora, até offline
+- Importa playlists e curtidas do **Apple Music** (Library.xml) e do **YouTube Music** (Google Takeout), além de CSV/M3U/XSPF, casando com as músicas que você tem
+- Normalização de volume (ReplayGain), volume lembrado, menu principal e janela adaptável a telas estreitas
 - Arrastar para reordenar fila e playlists; ordenação natural ("Artista 2" antes de "Artista 10")
 - Testado com 50 mil faixas: indexa em ~4 s e abre a janela em ~0,2 s
 
@@ -34,7 +36,8 @@ Dependências (Ubuntu/Debian):
 sudo apt install qt6-base-dev qt6-declarative-dev qt6-multimedia-dev \
   qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
   qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtmultimedia \
-  qml6-module-qtqml-workerscript libqt6svg6 gstreamer1.0-plugins-good
+  qml6-module-qtqml-workerscript qml6-module-qtquick-dialogs \
+  qml6-module-qt-labs-folderlistmodel libqt6svg6 gstreamer1.0-plugins-good
 ```
 
 Fedora: `sudo dnf install qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtmultimedia-devel`
@@ -72,6 +75,7 @@ arara remote add subsonic https://musica.exemplo.com usuario senha
 arara remote add jellyfin https://jellyfin.exemplo.com usuario senha
 arara remote sync        # sincroniza os servidores
 arara remote list
+arara import ~/Downloads/Takeout   # ou Library.xml, .csv, .m3u
 ```
 
 Para testar sem um servidor de verdade: `python3 tools/mock_server.py --audio musica.mp3 --covers pasta-com-jpgs/` sobe um Subsonic + Jellyfin falso (usuário e senha `demo`).

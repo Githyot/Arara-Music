@@ -79,7 +79,7 @@ Rectangle {
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter
-            width: row.width - 230
+            width: Math.max(60, row.width - handle.width - (row.showArt ? 38 : 22) - 26 - rightRow.width - 24)
             Text {
                 width: parent.width
                 text: row.track ? row.track.title : ""
@@ -97,6 +97,7 @@ Rectangle {
     }
 
     Row {
+        id: rightRow
         anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
         spacing: 2
         Icon {

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls.Basic
 import QtMultimedia
+import QtQuick.Dialogs
 import AraraStyle
 import io.github.arara
 
@@ -18,13 +19,30 @@ Window {
     readonly property bool csd: Qt.application.arguments.indexOf("--ssd") < 0
     flags: csd ? (Qt.Window | Qt.FramelessWindowHint) : Qt.Window
     readonly property bool narrow: width < 620
+    property bool drawerOpen: false
+    onNarrowChanged: drawerOpen = false
+    // Volume chosen by the user; ReplayGain scales the real output under it.
+    property real userVolume: 1.0
+    property bool replayGain: true
+    readonly property real gainFactor: {
+        var t = player.current
+        if (!replayGain || !t) return 1.0
+        var g = t.gain !== undefined && t.gain !== null ? t.gain : t.albumGain
+        if (g === undefined || g === null) return 1.0
+        return Math.min(1.0, Math.pow(10, Number(g) / 20))
+    }
 
     Binding { target: Theme; property: "dark"; value: library.dark }
     Binding { target: Theme; property: "accent"; value: library.accent }
 
     Library {
         id: library
-        Component.onCompleted: { library.open(); player.restore() }
+        Component.onCompleted: {
+            library.open()
+            win.userVolume = Number(library.setting("volume", "1"))
+            win.replayGain = library.setting("replaygain", "1") === "1"
+            player.restore()
+        }
         onLibraryChanged: {
             albumGrid.albums = JSON.parse(library.albumsJson())
             artistGrid.artists = JSON.parse(library.artistsJson())
@@ -34,6 +52,15 @@ Window {
         onServersChanged: {
             sidebar.servers = JSON.parse(library.serversJson())
             if (nav.page === "server") nav.refresh()
+        }
+        onImportFinished: (json) => importDialog.finished(json)
+        onPathPicked: (purpose, path) => {
+            if (purpose === "library") library.changeLibraryDir(path)
+            else importDialog.pickedPath(path)
+        }
+        onPickerUnavailable: (purpose, directory) => {
+            if (purpose === "library") folderDialog.open()
+            else importDialog.fallback(directory)
         }
         onServerAdded: (ok, message) => { addServer.finished(ok, message); if (ok) toast.show(message) }
         onPlaylistsChanged: { sidebar.playlists = JSON.parse(library.playlistsJson()); if (nav.page === "playlist") nav.refresh() }
@@ -109,6 +136,14 @@ Window {
             var q = queue.slice(); var t = q.splice(from, 1)[0]; q.splice(to, 0, t)
             queue = q; index = q.indexOf(cur); save()
         }
+        // Remove tracks that no longer exist (e.g. a removed server) from the queue.
+        function dropWhere(pred) {
+            var cur = current, q = queue.filter(function (t) { return !pred(t) })
+            if (q.length === queue.length) return
+            if (cur && pred(cur)) { media.stop(); queue = q; index = q.length ? 0 : -1; if (current) start(false) }
+            else { queue = q; index = q.indexOf(cur) }
+            save()
+        }
         function toggleShuffle() {
             if (!current) { shuffle = !shuffle; return }
             if (!shuffle) {
@@ -143,7 +178,15 @@ Window {
 
     MediaPlayer {
         id: media
-        audioOutput: AudioOutput { id: audio; volume: 1.0 }
+        audioOutput: AudioOutput { id: audio; volume: win.userVolume * win.gainFactor }
+        // A missing file or unreachable server: say so and move on, but don't
+        // spin through a whole queue of broken tracks.
+        property int failures: 0
+        onErrorOccurred: (error, message) => {
+            if (!player.current) return
+            toast.show("Não foi possível tocar “" + player.current.title + "”")
+            if (++failures < 3) player.next()
+        }
         onMediaStatusChanged: {
             if (mediaStatus === MediaPlayer.EndOfMedia) player.next()
             if (mediaStatus === MediaPlayer.LoadedMedia) applyPendingSeek()
@@ -153,7 +196,7 @@ Window {
             if (player.pendingSeek > 0 && seekable) { position = player.pendingSeek; player.pendingSeek = -1 }
         }
         onSeekableChanged: applyPendingSeek()
-        onPlaybackStateChanged: { applyPendingSeek(); mpris.push() }
+        onPlaybackStateChanged: { if (playbackState === MediaPlayer.PlayingState) failures = 0; applyPendingSeek(); mpris.push() }
     }
 
     // MPRIS mirror: state on change, position once a second while playing.
@@ -162,7 +205,7 @@ Window {
         function push() {
             var st = media.playbackState === MediaPlayer.PlayingState ? "Playing" : media.playbackState === MediaPlayer.PausedState ? "Paused" : (player.current ? "Paused" : "Stopped")
             library.mprisUpdate(st, player.current ? JSON.stringify(player.current) : "null",
-                                player.index + 1 < player.queue.length || player.repeat === "all", player.index > 0 || !!player.current, audio.volume)
+                                player.index + 1 < player.queue.length || player.repeat === "all", player.index > 0 || !!player.current, win.userVolume)
         }
     }
     Connections { target: player; function onCurrentChanged() { mpris.push() } function onQueueChanged() { mpris.push() } }
@@ -181,18 +224,23 @@ Window {
         property var playlist: null
         property var server: null
         property var history: []
+        // Sidebar entry the current view belongs to (an album opened from a server keeps "server").
+        property string section: "albums"
 
         function go(p) {
-            if (p !== page) history.push({ page: page, album: album, artist: artist, playlist: playlist, server: server })
-            page = p; refresh()
+            if (p !== page) history.push({ page: page, section: section, album: album, artist: artist, playlist: playlist, server: server })
+            page = p; if (p === "songs") section = "songs"
+            refresh()
             if (p === "songs") search.forceActiveFocus()
         }
         function back() {
             var h = history.pop()
-            if (!h) { page = "albums"; return }
-            page = h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; refresh()
+            if (!h) { root("albums"); return }
+            page = h.page; section = h.section || h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; refresh()
         }
-        function root(p) { page = p; history = []; refresh(); if (p === "songs") search.forceActiveFocus() }
+        function root(p) { page = p; section = p; history = []; win.drawerOpen = false; refresh(); if (p === "songs") search.forceActiveFocus() }
+        function rootPlaylist(p) { playlist = p; page = "playlist"; section = "playlist"; history = []; win.drawerOpen = false; refresh() }
+        function rootServer(sv) { server = sv; page = "server"; section = "server"; history = []; win.drawerOpen = false; refresh() }
         function openAlbum(a) { album = a; albumPage.tracks = JSON.parse(library.albumTracksJson(a.id)); albumPage.contentY = 0; go("album") }
         function openAlbumById(id) {
             var a = albumGrid.albums.find(function (x) { return x.id === id })
@@ -246,31 +294,39 @@ Window {
         border.color: Theme.border; border.width: win.csd ? 1 : 0
         clip: true
 
+        // Scrim behind the sidebar when it slides over the content (narrow windows).
+        Rectangle {
+            anchors.fill: parent; z: 9
+            visible: win.narrow && win.drawerOpen
+            color: "#4d000000"
+            MouseArea { anchors.fill: parent; onClicked: win.drawerOpen = false }
+        }
         Sidebar {
             id: sidebar
-            visible: !win.narrow
-            width: visible ? 230 : 0
+            z: 10
+            visible: !win.narrow || win.drawerOpen
+            width: 230
             anchors { left: parent.left; top: parent.top; bottom: playerBar.top }
             radius: frame.radius
             window: win
-            page: nav.page
+            page: nav.section
             playlistId: nav.playlist ? nav.playlist.id : -1
             footer: library.scanning ? library.status : library.trackCount + " faixas · " + library.albumCount + " álbuns"
             onNavigate: (p) => nav.root(p)
-            onOpenPlaylist: (p) => { nav.history = []; nav.openPlaylist(p) }
+            onOpenPlaylist: (p) => nav.rootPlaylist(p)
             servers: []
             serverId: nav.server ? nav.server.id : -1
-            onOpenServer: (sv) => { nav.history = []; nav.openServer(sv) }
+            onOpenServer: (sv) => nav.rootServer(sv)
             onAddServer: addServer.start()
             onNewPlaylist: prompt.ask("Nova playlist", "", "", "Criar", function (name) {
                 var id = Number(library.createPlaylist(name))
-                nav.openPlaylist({ id: id, name: name })
+                nav.rootPlaylist({ id: id, name: name })
             })
         }
 
         Item {
             id: content
-            anchors { left: sidebar.right; right: parent.right; top: parent.top; bottom: playerBar.top }
+            anchors { left: win.narrow ? parent.left : sidebar.right; right: parent.right; top: parent.top; bottom: playerBar.top }
 
             HeaderBar {
                 id: header
@@ -279,7 +335,8 @@ Window {
                 showControls: win.csd
                 title: nav.title
                 leading: [
-                    FlatButton { icon: "back"; visible: nav.history.length > 0 || nav.page === "album" || nav.page === "artist"; onClicked: nav.back() }
+                    FlatButton { icon: "sidebar"; visible: win.narrow; checked: win.drawerOpen; onClicked: win.drawerOpen = !win.drawerOpen },
+                    FlatButton { icon: "back"; visible: nav.history.length > 0; onClicked: nav.back() }
                 ]
                 trailing: [
                     Rectangle {
@@ -297,7 +354,8 @@ Window {
                             Text { anchors.verticalCenter: parent.verticalCenter; visible: !search.text; text: "Pesquisar na biblioteca"; color: Theme.dimFg; font: search.font }
                         }
                     },
-                    FlatButton { icon: "search"; visible: nav.page !== "songs"; onClicked: nav.go("songs") }
+                    FlatButton { icon: "search"; visible: nav.page !== "songs"; onClicked: nav.go("songs") },
+                    FlatButton { id: menuButton; icon: "menu"; onClicked: appMenu.openUnder(menuButton) }
                 ]
             }
             Timer { id: searchTimer; interval: 120; onTriggered: songs.search(search.text) }
@@ -354,7 +412,7 @@ Window {
                     onSyncRequested: library.syncServers(nav.server.id)
                     onRemoveRequested: prompt.confirm("Remover “" + nav.server.name + "”?",
                         "As músicas desse servidor saem da biblioteca e das playlists. Nada é apagado no servidor.", "Remover", function () {
-                        var id = nav.server.id; nav.root("albums"); library.removeServer(id)
+                        var id = nav.server.id, base = nav.server.url; nav.root("albums"); library.removeServer(id); player.dropWhere(function (t) { return t.remote && t.url.indexOf(base) === 0 })
                     })
                 }
                 SongsPage {
@@ -409,7 +467,7 @@ Window {
             duration: media.duration
             shuffle: player.shuffle
             repeat: player.repeat
-            volume: audio.volume
+            volume: win.userVolume
             onToggle: playing ? media.pause() : (player.current ? media.play() : null)
             onNext: player.next()
             onPrev: player.prev()
@@ -417,7 +475,7 @@ Window {
             onExpand: nowPlaying.visible = true
             onToggleShuffle: player.toggleShuffle()
             onCycleRepeat: player.cycleRepeat()
-            onVolumeMoved: (v) => { audio.volume = v; mpris.push() }
+            onVolumeMoved: (v) => { win.userVolume = v; volumeSave.restart(); mpris.push() }
         }
 
         NowPlaying {
@@ -494,6 +552,31 @@ Window {
         onGoToAlbum: (t) => { nowPlaying.visible = false; nav.openAlbumById(t.albumId) }
     }
     TextPrompt { id: prompt }
+    Timer { id: volumeSave; interval: 600; onTriggered: library.setSetting("volume", String(win.userVolume)) }
+    ImportDialog {
+        id: importDialog
+        onImportPath: (path) => library.importPath(path)
+        onPickRequested: (directory) => library.pickPath("import", directory ? "Escolha a pasta exportada" : "Escolha o arquivo exportado", directory)
+    }
+    AppMenu {
+        id: appMenu
+        replayGain: win.replayGain
+        onChooseFolder: library.pickPath("library", "Escolha a pasta de músicas", true)
+        onRescan: library.changeLibraryDir(library.libraryDir)
+        onImportPlaylists: importDialog.start()
+        onToggleReplayGain: { win.replayGain = !win.replayGain; library.setSetting("replaygain", win.replayGain ? "1" : "0") }
+        onShortcuts: prompt.info("Atalhos de teclado",
+            "Espaço: tocar ou pausar\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: tocando agora e letra\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
+        onAbout: prompt.info("Arara Music 0.4",
+            "Player de música leve para GNOME, em Rust e Qt.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
+    }
+    FolderDialog {
+        id: folderDialog
+        title: "Escolha a pasta de músicas"
+        currentFolder: "file://" + library.libraryDir
+        options: FolderDialog.ShowDirsOnly
+        onAccepted: library.changeLibraryDir(decodeURIComponent(selectedFolder.toString().replace(/^file:\/\//, "")))
+    }
     AddServerDialog {
         id: addServer
         onSubmit: (kind, url, user, password) => library.addServer(kind, url, user, password)
@@ -522,7 +605,7 @@ Window {
 
     onClosing: player.save()
 
-    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible && !addServer.visible; onActivated: playerBar.toggle() }
+    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible && !addServer.visible && !importDialog.visible; onActivated: playerBar.toggle() }
     Shortcut { sequence: "Ctrl+F"; onActivated: nav.go("songs") }
     Shortcut { sequence: "Ctrl+Right"; onActivated: player.next() }
     Shortcut { sequence: "Ctrl+Left"; onActivated: player.prev() }

@@ -209,6 +209,9 @@ pub struct TrackRow {
     pub duration_ms: i64,
     pub starred: bool,
     pub cover_hash: Option<String>,
+    /// ReplayGain in dB, when the file is tagged.
+    pub track_gain: Option<f64>,
+    pub album_gain: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -228,7 +231,7 @@ pub struct PlaylistRow {
 }
 
 const TRACK_COLS: &str =
-    "t.id, t.path, t.title, t.artist, a.title, t.album_id, t.duration_ms, t.starred, a.cover_hash";
+    "t.id, t.path, t.title, t.artist, a.title, t.album_id, t.duration_ms, t.starred, a.cover_hash, t.track_gain, t.album_gain";
 
 #[derive(Debug, Clone)]
 pub struct AlbumRow {
@@ -600,6 +603,8 @@ fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
         duration_ms: r.get(6)?,
         starred: r.get::<_, i64>(7)? != 0,
         cover_hash: r.get(8)?,
+        track_gain: r.get(9)?,
+        album_gain: r.get(10)?,
     })
 }
 

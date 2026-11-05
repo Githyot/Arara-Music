@@ -3,6 +3,7 @@
 
 pub mod covers;
 pub mod db;
+pub mod import;
 pub mod lyrics;
 pub mod natural;
 pub mod remote;

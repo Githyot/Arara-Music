@@ -40,5 +40,9 @@
     <file alias="icons/refresh.svg">qml/style/icons/refresh.svg</file>
     <file alias="icons/warning.svg">qml/style/icons/warning.svg</file>
     <file alias="icons/cloud.svg">qml/style/icons/cloud.svg</file>
+    <file alias="icons/menu.svg">qml/style/icons/menu.svg</file>
+    <file alias="icons/sidebar.svg">qml/style/icons/sidebar.svg</file>
+    <file alias="icons/folder.svg">qml/style/icons/folder.svg</file>
+    <file alias="icons/import.svg">qml/style/icons/import.svg</file>
   </qresource>
 </RCC>

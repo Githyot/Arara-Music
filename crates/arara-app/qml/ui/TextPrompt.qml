@@ -10,17 +10,24 @@ Popup {
     property string acceptLabel: "Criar"
     property bool destructive: false
     property bool needsText: true
+    property bool infoOnly: false
     property var onAccept: null
     property alias text: field.text
 
     function ask(h, b, initial, label, cb) {
         heading = h; body = b; field.text = initial; acceptLabel = label; onAccept = cb
-        destructive = false; needsText = true
+        destructive = false; needsText = true; infoOnly = false
         open(); field.forceActiveFocus(); field.selectAll()
     }
     function confirm(h, b, label, cb) {
         heading = h; body = b; acceptLabel = label; onAccept = cb
-        destructive = true; needsText = false
+        destructive = true; needsText = false; infoOnly = false
+        open()
+    }
+    // Message with a single "Fechar" button (about, shortcuts, import report).
+    function info(h, b, label, cb) {
+        heading = h; body = b; acceptLabel = label || ""; onAccept = cb || null
+        destructive = false; needsText = false; infoOnly = true
         open()
     }
     function accept() {
@@ -58,8 +65,9 @@ Popup {
         Row {
             spacing: 12
             anchors.horizontalCenter: parent.horizontalCenter
-            FlatButton { text: "Cancelar"; color: Theme.hover; width: 150; onClicked: dlg.close() }
+            FlatButton { text: dlg.infoOnly ? "Fechar" : "Cancelar"; color: Theme.hover; width: 150; onClicked: dlg.close() }
             FlatButton {
+                visible: !dlg.infoOnly || dlg.acceptLabel !== ""
                 text: dlg.acceptLabel; width: 150
                 suggested: !dlg.destructive
                 destructive: dlg.destructive

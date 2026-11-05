@@ -9,8 +9,9 @@ GridView {
     property var albums: []
     signal openAlbum(var album)
 
-    readonly property int tile: 180
-    readonly property int columns: Math.max(1, Math.floor((width - 24) / (tile + 24)))
+    // 180 px tiles, but never fewer than two columns (tiles shrink on narrow windows).
+    readonly property int columns: Math.max(2, Math.floor((width - 24) / 204))
+    readonly property int tile: Math.min(180, Math.floor((width - 24) / columns) - 20)
     cellWidth: Math.floor((width - 24) / columns)
     cellHeight: tile + 64
     leftMargin: 12; rightMargin: 12; topMargin: 18; bottomMargin: 18

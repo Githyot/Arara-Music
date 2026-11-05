@@ -24,6 +24,8 @@ fn main() {
         "qml/ui/LyricsEditor.qml",
             "qml/ui/AddServerDialog.qml",
             "qml/ui/ServerPage.qml",
+            "qml/ui/AppMenu.qml",
+            "qml/ui/ImportDialog.qml",
     ]))
     // Theme singleton lives in its own tiny module so every file can `import AraraStyle`.
     .qrc("style.qrc")

@@ -382,3 +382,69 @@ pub fn watch_appearance(on_change: impl Fn(Appearance) + Send + 'static) {
         })
         .ok();
 }
+
+// ---------- file chooser portal ----------
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Native GNOME file/folder chooser through xdg-desktop-portal (also works
+/// inside Flatpak). Blocks until the user answers: Ok(None) = cancelled,
+/// Err = no portal available (the caller falls back to Qt's own dialog).
+pub fn portal_pick(title: &str, directory: bool, filters: &[(&str, &[&str])]) -> Result<Option<String>, String> {
+    let e = |x: zbus::Error| x.to_string();
+    let conn = Connection::session().map_err(e)?;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let token = format!("arara{}_{nanos}", std::process::id());
+    let sender = conn.unique_name().ok_or("sem nome no barramento")?.trim_start_matches(':').replace('.', "_");
+    let req_path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
+    let req = zbus::blocking::Proxy::new(&conn, "org.freedesktop.portal.Desktop", req_path.as_str(), "org.freedesktop.portal.Request").map_err(e)?;
+    let mut responses = req.receive_signal("Response").map_err(e)?;
+    let chooser = zbus::blocking::Proxy::new(
+        &conn,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.FileChooser",
+    )
+    .map_err(e)?;
+    let mut opts: HashMap<&str, Value> = HashMap::new();
+    opts.insert("handle_token", Value::from(token.as_str()));
+    opts.insert("modal", Value::from(true));
+    opts.insert("directory", Value::from(directory));
+    let f: Vec<(String, Vec<(u32, String)>)> = filters
+        .iter()
+        .map(|(n, pats)| (n.to_string(), pats.iter().map(|p| (0u32, p.to_string())).collect()))
+        .collect();
+    if !f.is_empty() {
+        opts.insert("filters", Value::new(f));
+    }
+    let _: zbus::zvariant::OwnedObjectPath = chooser.call("OpenFile", &("", title, opts)).map_err(e)?;
+    let msg = responses.next().ok_or("o portal não respondeu")?;
+    let (code, results): (u32, HashMap<String, OwnedValue>) = msg.body().deserialize().map_err(e)?;
+    if code != 0 {
+        return Ok(None);
+    }
+    let first = match results.get("uris").map(|v| &**v) {
+        Some(Value::Array(a)) => a.iter().find_map(|v| match v {
+            Value::Str(s) => Some(s.to_string()),
+            _ => None,
+        }),
+        _ => None,
+    };
+    Ok(first.map(|u| percent_decode(u.strip_prefix("file://").unwrap_or(&u))))
+}

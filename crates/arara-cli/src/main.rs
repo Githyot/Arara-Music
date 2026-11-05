@@ -7,10 +7,11 @@
 //!   arara remote add <subsonic|jellyfin> <url> <user> <password>
 //!   arara remote sync [id]       mirror remote catalogs into the index
 //!   arara remote list
+//!   arara import <file-or-folder> Apple Music / YouTube Music / CSV / M3U exports
 //!
 //! Set ARARA_DB / ARARA_COVERS to override the XDG locations.
 
-use arara_core::{covers::CoverCache, db::Db, lyrics, remote, scanner, Paths};
+use arara_core::{covers::CoverCache, db::Db, import, lyrics, remote, scanner, Paths};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -73,6 +74,21 @@ fn main() {
                 }
                 lyrics::Lyrics::Plain(p) => println!("{p}"),
                 lyrics::Lyrics::None => println!("(sem letra)"),
+            }
+        }
+        "import" => {
+            let path = PathBuf::from(rest.first().expect("arquivo ou pasta"));
+            let pls = import::read_path(&path).unwrap_or_else(|e| panic!("{e}"));
+            for p in &pls {
+                println!("  {} [{}{}] {} faixas", p.name, p.source, if p.liked { ", curtidas" } else { "" }, p.entries.len());
+            }
+            let r = import::apply(&db, &pls).unwrap();
+            println!(
+                "{} de {} encontradas · {} playlists · {} favoritas · {} sem nome · {} faltando",
+                r.matched, r.total, r.playlists, r.starred, r.unreadable, r.missing.len()
+            );
+            for m in r.missing.iter().take(10) {
+                println!("    faltando: {} — {} ({})", m.entry.artist, m.entry.title, m.playlist);
             }
         }
         "remote" => {

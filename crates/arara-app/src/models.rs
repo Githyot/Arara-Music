@@ -107,6 +107,7 @@ impl TrackModelRust {
             "id": t.id, "title": t.title, "artist": t.artist, "album": t.album,
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
             "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
+            "gain": t.track_gain, "albumGain": t.album_gain,
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
