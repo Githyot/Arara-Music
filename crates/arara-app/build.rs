@@ -27,6 +27,6 @@ fn main() {
     .qrc("style.qrc")
     .qt_module("Quick")
     .qt_module("Multimedia")
-    .files(["src/bridge.rs"])
+    .files(["src/bridge.rs", "src/models.rs"])
     .build();
 }

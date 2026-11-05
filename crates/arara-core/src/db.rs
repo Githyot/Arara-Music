@@ -269,6 +269,13 @@ impl Db {
         Ok(())
     }
 
+    pub fn all_tracks(&self) -> Result<Vec<TrackRow>> {
+        self.tracks_where(
+            "1 ORDER BY t.artist COLLATE NATSORT, a.year, a.title COLLATE NATSORT, t.disc_no, t.track_no",
+            [],
+        )
+    }
+
     pub fn starred_tracks(&self) -> Result<Vec<TrackRow>> {
         self.tracks_where("t.starred = 1 ORDER BY t.artist COLLATE NATSORT, a.title COLLATE NATSORT, t.disc_no, t.track_no", [])
     }

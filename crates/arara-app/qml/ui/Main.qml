@@ -28,6 +28,7 @@ Window {
         onLibraryChanged: {
             albumGrid.albums = JSON.parse(library.albumsJson())
             artistGrid.artists = JSON.parse(library.artistsJson())
+            if (songs.loaded) songs.reload()
             nav.refresh()
         }
         onPlaylistsChanged: { sidebar.playlists = JSON.parse(library.playlistsJson()); if (nav.page === "playlist") nav.refresh() }
@@ -280,7 +281,7 @@ Window {
                     FlatButton { icon: "search"; visible: nav.page !== "songs"; onClicked: nav.go("songs") }
                 ]
             }
-            Timer { id: searchTimer; interval: 120; onTriggered: songs.results = JSON.parse(library.searchJson(search.text)) }
+            Timer { id: searchTimer; interval: 120; onTriggered: songs.search(search.text) }
 
             Item {
                 id: stack
@@ -328,7 +329,6 @@ Window {
                     id: songs
                     anchors.fill: parent
                     visible: nav.page === "songs"
-                    query: search.text
                     playingId: player.current ? player.current.id : -1
                     onPlay: (t, i) => player.playList(t, i)
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
