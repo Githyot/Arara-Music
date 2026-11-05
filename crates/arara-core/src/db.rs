@@ -114,6 +114,7 @@ impl Db {
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=NORMAL;
              PRAGMA foreign_keys=ON;
+             PRAGMA busy_timeout=5000;
              PRAGMA temp_store=MEMORY;
              PRAGMA cache_size=-8000;", // 8 MB page cache cap
         )?;

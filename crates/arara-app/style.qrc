@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/qt/qml/AraraStyle">
+    <file alias="qmldir">qml/style/qmldir</file>
+    <file alias="Theme.qml">qml/style/Theme.qml</file>
+  </qresource>
+</RCC>

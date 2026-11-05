@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/arara-core", "crates/arara-cli"]
+members = ["crates/arara-core", "crates/arara-cli", "crates/arara-app"]
 
 [workspace.package]
 version = "0.1.0"
