@@ -37,15 +37,18 @@ Rectangle {
     Item {
         id: titleBox
         readonly property real side: Math.max(leadingRow.width + 6, trailingRow.width + controls.width + 12) + 12
-        x: bar.centred ? side : leadingRow.x + leadingRow.width + (leadingRow.width > 0 ? 10 : (Theme.material ? 16 : 12))
-        width: Math.max(0, bar.centred ? bar.width - 2 * side : trailingRow.x - x - 12)
+        // A wide search field leaves no room in the middle: the title then sits
+        // on the left instead of disappearing.
+        readonly property bool mid: bar.centred && bar.width - 2 * side >= titleText.implicitWidth + 8
+        x: mid ? side : leadingRow.x + leadingRow.width + (leadingRow.width > 0 ? 10 : (Theme.material ? 16 : 12))
+        width: Math.max(0, mid ? bar.width - 2 * side : trailingRow.x - x - 12)
         height: titleText.height + (subText.visible ? subText.height : 0)
         anchors.verticalCenter: parent.verticalCenter
-        visible: width > 40
+        visible: width > 40 && bar.title !== ""
         Text {
             id: titleText
             width: parent.width
-            horizontalAlignment: bar.centred ? Text.AlignHCenter : Text.AlignLeft
+            horizontalAlignment: titleBox.mid ? Text.AlignHCenter : Text.AlignLeft
             text: bar.title
             color: Theme.fg
             font.family: Theme.material ? Theme.displayFont : Theme.font

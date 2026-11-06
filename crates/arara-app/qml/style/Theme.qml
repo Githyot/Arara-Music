@@ -27,7 +27,6 @@ QtObject {
     // Text/icons drawn in the accent colour stay readable on the window background.
     readonly property color accentFg: material || fluent ? accent
         : dark ? Qt.lighter(accent, 1.45) : Qt.darker(accent, 1.12)
-    // Ink on top of an accent fill (Material dark and Fluent dark use light accents).
     // Ink on top of an accent fill; set by Main from the final accent.
     property color accentInk: "#ffffff"
     readonly property color destructive: dark ? "#ff7b63" : "#c01c28"

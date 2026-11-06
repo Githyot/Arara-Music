@@ -8,8 +8,23 @@ Item {
     id: view
     property var lyrics: ({ kind: "none" })
     property real position: 0
-    // Playback position shifted by the user's sync adjustment.
-    readonly property real at: position + Prefs.lyricsOffset
+    property bool playing: false
+    // Playback position shifted by the user's sync adjustment. The player only
+    // reports its position every ~100 ms, so between reports the clock runs on
+    // by itself every frame: the words fill and grow smoothly, not in steps.
+    property real at: position + Prefs.lyricsOffset
+    property real _base: 0
+    property real _baseT: 0
+    onPositionChanged: {
+        _base = position; _baseT = Date.now()
+        if (!clock.running) at = position + Prefs.lyricsOffset
+    }
+    FrameAnimation {
+        id: clock
+        running: view.playing && view.visible && view.lyrics.kind === "synced"
+        onTriggered: view.at = view._base + Math.min(400, Date.now() - view._baseT) + Prefs.lyricsOffset
+        onRunningChanged: if (!running) view.at = view.position + Prefs.lyricsOffset
+    }
     property bool loading: false
     // Lyrics screen: white text over the blurred cover, bigger type.
     property bool onDark: false
@@ -63,6 +78,13 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         topMargin: height * 0.3; bottomMargin: height * 0.7
         cacheBuffer: 2000
+        // Lines dissolve at the top and bottom edges instead of being cut off.
+        layer.enabled: true
+        layer.effect: ShaderEffect {
+            property real fadeTop: view.compact ? 0.2 : 0.12
+            property real fadeBottom: view.compact ? 0.2 : 0.16
+            fragmentShader: "qrc:/qt/qml/AraraStyle/fade.frag.qsb"
+        }
         onMovementStarted: { view.browsing = true; browseTimer.stop() }
         onMovementEnded: browseTimer.restart()
 
@@ -78,6 +100,10 @@ Item {
             readonly property real maxW: lv.width - 48 - (view.hasDuet ? lv.width * 0.1 : 0)
             width: lv.width
             height: flow.height * (bg ? 0.75 : 1)
+            // 1 while this is the line being sung; eases back to 0 after it, so
+            // the raised words settle down instead of snapping.
+            property real live: active ? 1 : 0
+            Behavior on live { NumberAnimation { duration: Theme.ms(520); easing.type: Easing.OutCubic } }
 
             transform: Translate { id: glide }
             Connections {
@@ -96,10 +122,14 @@ Item {
 
             TextMetrics { id: tm; font: probe.font; text: lineItem.modelData.text || "♪" }
             Text { id: probe; visible: false; font.family: Theme.font; font.pointSize: view.activeSize; font.weight: Font.Bold }
+            // Width of one space (measured between letters: a lone space measures 0).
+            TextMetrics { id: pairTm; font: probe.font; text: "n n" }
+            TextMetrics { id: nnTm; font: probe.font; text: "nn" }
+            readonly property real spaceW: Math.max(0, pairTm.advanceWidth - nnTm.advanceWidth)
 
             Flow {
                 id: flow
-                width: Math.min(lineItem.maxW, tm.advanceWidth + 8)
+                width: Math.min(lineItem.maxW, tm.advanceWidth * 1.05 + 8)
                 x: lineItem.onRight ? lineItem.width - width - 24 : 24
                 spacing: 0
                 scale: lineItem.active ? 1 : (lineItem.bg ? 0.62 : view.lineSize / view.activeSize)
@@ -110,22 +140,43 @@ Item {
                 Repeater {
                     model: lineItem.modelData.w.length > 0 ? lineItem.modelData.w : [[lineItem.modelData.t, lineItem.modelData.e, lineItem.modelData.text || "♪"]]
                     Item {
+                        id: word
                         required property var modelData
                         readonly property real p: !lineItem.active ? (lineItem.past ? 1 : 0)
                             : Math.max(0, Math.min(1, (view.at - modelData[0]) / Math.max(1, modelData[1] - modelData[0])))
-                        width: base.implicitWidth; height: base.implicitHeight
-                        Text {
-                            id: base
-                            text: modelData[2]
-                            color: lineItem.active ? view.ink : view.dim
-                            opacity: lineItem.active ? 0.4 : 1
-                            font: probe.font
-                        }
-                        // The sung part: same text, clipped to progress, fully bright.
+                        // Apple-Music-like: as a word is sung it rises a little and
+                        // grows a touch; held (long) words swell a bit more while held.
+                        readonly property real ease: 1 - Math.pow(1 - p, 3)
+                        readonly property bool held: modelData[1] - modelData[0] > 900
+                        readonly property string txt: String(modelData[2]).replace(/\s+$/, "")
+                        readonly property bool spaced: txt.length < String(modelData[2]).length
+                        // The trailing space sits outside the part that grows, so
+                        // neighbouring words never touch while they swell.
+                        // Room for the growth is reserved up front (constant per word),
+                        // so the line never reflows while it is sung.
+                        readonly property real room: base.implicitWidth * 0.04
+                        width: glyphs.width + room + (spaced ? lineItem.spaceW : 0); height: glyphs.height
                         Item {
-                            visible: lineItem.active
-                            width: base.width * parent.p; height: base.height; clip: true
-                            Text { text: modelData[2]; color: view.onDark ? "white" : Theme.accentFg; font: probe.font }
+                            id: glyphs
+                            x: word.room / 2
+                            width: base.implicitWidth; height: base.implicitHeight
+                            transformOrigin: Item.Bottom
+                            scale: 1 + lineItem.live * (0.04 * word.ease + (word.held ? 0.06 * Math.sin(Math.PI * word.p) : 0))
+                            transform: Translate { y: -glyphs.height * 0.065 * lineItem.live * word.ease }
+                            Text {
+                                id: base
+                                text: word.txt
+                                color: lineItem.active ? view.ink : view.dim
+                                opacity: lineItem.active ? 0.4 : 1
+                                font: probe.font
+                            }
+                            // The sung part: same text, clipped to progress, fully bright.
+                            Item {
+                                visible: lineItem.active || lineItem.live > 0.01
+                                width: base.width * word.p; height: base.height; clip: true
+                                opacity: lineItem.live
+                                Text { text: word.txt; color: view.onDark ? "white" : Theme.accentFg; font: probe.font }
+                            }
                         }
                     }
                 }

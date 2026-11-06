@@ -137,6 +137,7 @@ Item {
         duration: ls.duration
         loading: ls.loadingLyrics
         position: ls.position
+        playing: ls.playing
         onSeek: (ms) => ls.seek(ms)
         onAddLyrics: ls.editLyrics()
     }
@@ -145,7 +146,7 @@ Item {
         anchors { right: parent.right; top: parent.top; margins: 12 }
         spacing: 6
         FlatButton { icon: "refresh"; circular: true; iconColor: "white"; visible: ls.track !== null && !ls.loadingLyrics; onClicked: ls.refetchLyrics() }
-        FlatButton { icon: "edit"; circular: true; iconColor: "white"; visible: ls.track !== null; onClicked: ls.editLyrics() }
-        FlatButton { icon: "close"; circular: true; iconColor: "white"; onClicked: ls.close() }
+        FlatButton { icon: "edit"; tip: "Editar a letra"; circular: true; iconColor: "white"; visible: ls.track !== null; onClicked: ls.editLyrics() }
+        FlatButton { icon: "pan-down"; circular: true; iconColor: "white"; onClicked: ls.close() }
     }
 }

@@ -30,7 +30,7 @@ Item {
         width: sw.knob; height: sw.knob; radius: width / 2
         anchors.verticalCenter: parent.verticalCenter
         x: sw.checked ? sw.w - width - (sw.h - width) / 2 : (sw.h - width) / 2
-        color: sw.checked ? (Theme.material && Theme.dark ? "#381e72" : Theme.fluent && Theme.dark ? "#000000" : "white")
+        color: sw.checked ? (Theme.material || Theme.fluent ? Theme.accentInk : "white")
              : Theme.material ? (Theme.dark ? "#938f99" : "#79747e")
              : Theme.fluent ? Theme.dimFg : "white"
         border.width: Theme.gnome || Theme.apple ? 0.5 : 0

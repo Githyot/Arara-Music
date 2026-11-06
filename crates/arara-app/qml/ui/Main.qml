@@ -359,13 +359,15 @@ Window {
         property string section: "albums"
 
         function go(p) {
-            if (p !== page) history.push({ page: page, section: section, album: album, artist: artist, playlist: playlist, server: server })
+            // Reassign (not push) so bindings on history.length, like the back button, update.
+            if (p !== page) history = history.concat([{ page: page, section: section, album: album, artist: artist, playlist: playlist, server: server }])
             page = p; if (p === "songs") section = "songs"
             refresh()
             if (p === "songs") search.forceActiveFocus()
         }
         function back() {
-            var h = history.pop()
+            var h = history.length > 0 ? history[history.length - 1] : null
+            history = history.slice(0, -1)
             if (!h) { root("albums"); return }
             page = h.page; section = h.section || h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; refresh()
         }
@@ -427,7 +429,7 @@ Window {
             : page === "group" ? ""
             : page === "playlist" ? "Playlist"
             : page === "server" ? "Servidor"
-            : page === "songs" || page === "free" ? "" : "Álbuns"
+            : page === "songs" ? "Músicas" : page === "free" ? "" : "Álbuns"
     }
 
     function setVolume(v) { win.userVolume = v; volumeSave.restart(); mpris.push() }
@@ -516,7 +518,7 @@ Window {
                 trailing: [
                     Rectangle {
                         visible: true
-                        width: Math.max(160, Math.min(380, header.width * 0.42)); height: Theme.material ? 40 : 34
+                        width: Math.max(160, Math.min(340, header.width * 0.36)); height: Theme.material ? 40 : 34
                         radius: Theme.material ? height / 2 : Theme.radius
                         Layout.preferredWidth: width
                         clip: true

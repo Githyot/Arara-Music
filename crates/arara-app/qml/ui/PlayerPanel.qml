@@ -205,6 +205,7 @@ Rectangle {
                     lyrics: panel.lyrics
                     loading: panel.loadingLyrics
                     position: panel.position
+                    playing: panel.playing
                     duration: panel.duration
                     showAddButton: false
                     compact: true

@@ -1,5 +1,6 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as C
 
 // Adwaita "flat" button: transparent until hovered; `suggested` gives the blue pill.
 Rectangle {
@@ -16,6 +17,17 @@ Rectangle {
     // Override for the icon tint (e.g. white on the lyrics screen); undefined = automatic.
     property var iconColor: undefined
     readonly property bool hovered: ma.containsMouse
+    // Tooltip for icon-only buttons (GNOME shows one on every icon button).
+    // Defaults from the icon name; set tip: "" to hide or a text to override.
+    readonly property var defaultTips: ({
+        back: "Voltar", menu: "Menu principal", sidebar: "Barra lateral", shuffle: "Aleatório",
+        prev: "Anterior", next: "Próxima", repeat: "Repetir", repeat1: "Repetir esta música",
+        lyrics: "Letra", more: "Mais opções", refresh: "Buscar a letra de novo", edit: "Editar",
+        close: "Fechar", star: "Tirar dos favoritos", unstar: "Favoritar", playlist: "Adicionar a uma playlist",
+        queue: "Fila", add: "Adicionar", trash: "Remover", remove: "Remover", "pan-down": "Fechar a letra",
+        download: "Baixar", sort: "Ordenar", search: "Buscar", settings: "Preferências", undo: "Desfazer"
+    })
+    property string tip: text === "" ? (defaultTips[icon] || "") : ""
     signal clicked()
 
     implicitWidth: text !== "" ? label.implicitWidth + 24 : size
@@ -49,6 +61,19 @@ Rectangle {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
+        // After a click the tooltip stays away until the pointer leaves, so it
+        // never covers the menu or popup the button just opened.
+        property bool tipBlocked: false
+        onPressed: tipBlocked = true
+        onExited: tipBlocked = false
         onClicked: root.clicked()
+    }
+    C.ToolTip {
+        id: tt
+        visible: root.tip !== "" && ma.containsMouse && !ma.tipBlocked
+        delay: 600
+        text: root.tip
+        contentItem: Text { text: tt.text; color: Theme.toastFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1 }
+        background: Rectangle { color: Theme.toastBg; radius: Theme.material ? 4 : 6; opacity: 0.95 }
     }
 }

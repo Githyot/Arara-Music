@@ -33,7 +33,9 @@ Column {
             anchors { left: parent.left; right: parent.right; top: parent.top }
             onDark: pc.onDark
             from: 0; to: Math.max(1, pc.duration)
-            value: pressed ? value : pc.position
+            // Depends on the duration too: a position restored before the file
+            // is loaded was clamped to the old range and the bar stayed empty.
+            value: pressed ? value : Math.min(pc.position, Math.max(1, pc.duration))
             onMoved: pc.seek(value)
         }
         Text {
