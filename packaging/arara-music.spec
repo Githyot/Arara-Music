@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.3
+Version:        0.7.4
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,11 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Fri Nov 06 2026 Arara Music <noreply@anthropic.com> - 0.7.4-1
+- Velocidade de reprodução de 0,25x a 2x, em passos de 0,01 (botão entre os
+  tempos do player, atalhos [ ] e \\, roda do mouse, MPRIS Rate)
+- A letra karaokê acompanha a velocidade; o tom da voz é mantido no Qt 6.10+
+
 * Fri Nov 06 2026 Arara Music <noreply@anthropic.com> - 0.7.3-1
 - Selo E de explícito ao lado do nome das músicas (listas, painel, barra,
   tela de letra), lido das tags (iTunes/ID3/Vorbis), do Navidrome e do Jellyfin
