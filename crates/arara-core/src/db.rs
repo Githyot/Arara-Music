@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS tracks (
     format      TEXT,              -- FLAC, MP3, Opus…
     sample_rate INTEGER,
     bit_depth   INTEGER,
-    bitrate     INTEGER             -- kbit/s
+    bitrate     INTEGER,            -- kbit/s
+    explicit        INTEGER,        -- advisory from the tag/server: 1 explicit, 0 clean, NULL unknown
+    explicit_lyrics INTEGER,        -- guess from the lyrics (see explicit.rs)
+    explicit_user   INTEGER         -- the user's choice, overrides both
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id, disc_no, track_no);
 
@@ -123,6 +126,8 @@ pub struct NewTrack<'a> {
     pub sample_rate: Option<u32>,
     pub bit_depth: Option<u8>,
     pub bitrate: Option<u32>,
+    /// Parental advisory from the tag or server (None = unknown).
+    pub explicit: Option<bool>,
 }
 
 /// Insert/update one track (plus its artist, album and search entry) on an open
@@ -173,8 +178,8 @@ pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
     c.execute(
         "INSERT INTO tracks(path, mtime, size, title, artist, album_id, track_no, disc_no, year, duration_ms,
                             track_gain, album_gain, cover_hash, genre, composer, added_at,
-                            format, sample_rate, bit_depth, bitrate)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
+                            format, sample_rate, bit_depth, bitrate, explicit)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
          ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, title=excluded.title,
            artist=excluded.artist, album_id=excluded.album_id, track_no=excluded.track_no,
            disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,
@@ -182,12 +187,13 @@ pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
            cover_hash=COALESCE(excluded.cover_hash, CASE WHEN excluded.album_id IS NULL THEN tracks.cover_hash END),
            genre=excluded.genre, composer=excluded.composer,
            added_at=COALESCE(tracks.added_at, excluded.added_at),
-           format=excluded.format, sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth, bitrate=excluded.bitrate",
+           format=excluded.format, sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth, bitrate=excluded.bitrate,
+           explicit=excluded.explicit",
         params![
             p.path, p.mtime, p.size, p.title, p.artist, album_id, p.track_no, p.disc_no,
             p.year, p.duration_ms, p.track_gain, p.album_gain, track_cover, p.genre, p.composer,
             if p.mtime > 0 && !p.path.starts_with(crate::remote::PREFIX) { p.mtime } else { now },
-            p.format, p.sample_rate, p.bit_depth, p.bitrate
+            p.format, p.sample_rate, p.bit_depth, p.bitrate, p.explicit
         ],
     )?;
     let tid: i64 = c.query_row("SELECT id FROM tracks WHERE path=?1", [p.path], |r| r.get(0))?;
@@ -249,6 +255,9 @@ pub struct TrackRow {
     pub sample_rate: Option<i64>,
     pub bit_depth: Option<i64>,
     pub bitrate: Option<i64>,
+    /// 0 = not explicit, 1 = explicit (tag, server or user), 2 = only the
+    /// lyrics look explicit (shown when the preference allows).
+    pub explicit: i64,
 }
 
 impl TrackRow {
@@ -301,7 +310,10 @@ pub struct PlaylistRow {
 pub(crate) const TRACK_COLS: &str =
     "t.id, t.path, t.title, t.artist, a.title, t.album_id, t.duration_ms, t.starred, COALESCE(a.cover_hash, t.cover_hash),
      t.track_gain, t.album_gain, COALESCE(t.year, a.year), t.genre,
-     (SELECT name FROM artists WHERE id = a.artist_id), t.format, t.sample_rate, t.bit_depth, t.bitrate";
+     (SELECT name FROM artists WHERE id = a.artist_id), t.format, t.sample_rate, t.bit_depth, t.bitrate,
+     CASE WHEN COALESCE(t.explicit_user, t.explicit) = 1 THEN 1
+          WHEN COALESCE(t.explicit_user, t.explicit) = 0 THEN 0
+          WHEN t.explicit_lyrics = 1 THEN 2 ELSE 0 END";
 
 #[derive(Debug, Clone)]
 pub struct AlbumRow {
@@ -373,6 +385,30 @@ impl Db {
                  ALTER TABLE playlists ADD COLUMN lim INTEGER;",
             )?;
         }
+        // v0.7 → v0.8: explicit marking. Local files are re-read on the next
+        // scan to pick up advisory tags; lyrics already cached are checked now.
+        let has_explicit: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('tracks') WHERE name='explicit'")?
+            .exists([])?;
+        if !has_explicit {
+            conn.execute_batch(
+                "ALTER TABLE tracks ADD COLUMN explicit INTEGER;
+                 ALTER TABLE tracks ADD COLUMN explicit_lyrics INTEGER;
+                 ALTER TABLE tracks ADD COLUMN explicit_user INTEGER;
+                 UPDATE tracks SET mtime = 0 WHERE path NOT LIKE 'remote://%';",
+            )?;
+            let rows: Vec<(i64, String)> = {
+                let mut st = conn.prepare(
+                    "SELECT track_id, COALESCE(synced, '') || char(10) || COALESCE(plain, '') FROM lyrics",
+                )?;
+                let it = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                it.flatten().collect()
+            };
+            for (id, text) in rows {
+                let e = crate::explicit::lyrics_are_explicit(&text) as i64;
+                conn.execute("UPDATE tracks SET explicit_lyrics=?1 WHERE id=?2", params![e, id])?;
+            }
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre COLLATE NOCASE);
              CREATE INDEX IF NOT EXISTS tracks_added ON tracks(added_at);",
@@ -389,6 +425,7 @@ impl Db {
         q("SELECT 1 FROM kv WHERE k='schema_version'")
             && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='genre'")
             && q("SELECT 1 FROM pragma_table_info('playlists') WHERE name='query'")
+            && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='explicit'")
             && q("SELECT 1 FROM sqlite_master WHERE type='index' AND name='tracks_added'")
     }
 
@@ -521,6 +558,16 @@ impl Db {
 
     pub fn set_starred(&self, track_id: i64, starred: bool) -> Result<()> {
         self.conn.execute("UPDATE tracks SET starred=?1 WHERE id=?2", params![starred as i64, track_id])?;
+        Ok(())
+    }
+
+    /// The user's own explicit marking: Some(true/false) overrides tag and
+    /// lyrics, None goes back to automatic.
+    pub fn set_explicit_user(&self, track_id: i64, explicit: Option<bool>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tracks SET explicit_user=?1 WHERE id=?2",
+            params![explicit.map(|b| b as i64), track_id],
+        )?;
         Ok(())
     }
 
@@ -747,6 +794,9 @@ impl Db {
                  plain=excluded.plain, fetched_at=excluded.fetched_at",
             params![track_id, source, synced, plain, now],
         )?;
+        let text = format!("{}\n{}", synced.unwrap_or_default(), plain.unwrap_or_default());
+        let e = crate::explicit::lyrics_are_explicit(&text) as i64;
+        self.conn.execute("UPDATE tracks SET explicit_lyrics=?1 WHERE id=?2", params![e, track_id])?;
         Ok(())
     }
 }
@@ -771,6 +821,7 @@ pub(crate) fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
         sample_rate: r.get(15)?,
         bit_depth: r.get(16)?,
         bitrate: r.get(17)?,
+        explicit: r.get(18)?,
     })
 }
 

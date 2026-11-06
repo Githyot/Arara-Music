@@ -84,14 +84,16 @@ pub struct RemoteTrack {
     pub year: Option<u32>,
     pub duration_ms: i64,
     pub genre: Option<String>,
+    pub explicit: Option<bool>,
 }
 
 impl RemoteTrack {
     /// Cheap fingerprint of the metadata we store; unchanged tracks are skipped on re-sync.
     fn signature(&self) -> i64 {
         let s = format!(
-            "{}\u{1}{}\u{1}{}\u{1}{:?}\u{1}{:?}\u{1}{:?}\u{1}{:?}\u{1}{}\u{1}{:?}",
-            self.title, self.artist, self.album_artist, self.album, self.track_no, self.disc_no, self.year, self.duration_ms, self.genre
+            "{}\u{1}{}\u{1}{}\u{1}{:?}\u{1}{:?}\u{1}{:?}\u{1}{:?}\u{1}{}\u{1}{:?}\u{1}{:?}",
+            self.title, self.artist, self.album_artist, self.album, self.track_no, self.disc_no, self.year, self.duration_ms, self.genre,
+            self.explicit
         );
         let h = blake3::hash(s.as_bytes());
         i64::from_le_bytes(h.as_bytes()[..8].try_into().unwrap())
@@ -264,6 +266,8 @@ fn subsonic_song(v: &Value, album_artist_fallback: Option<&str>) -> Option<Remot
         year: vu32(&v["year"]),
         duration_ms: v["duration"].as_i64().unwrap_or(0) * 1000,
         genre: vs(&v["genre"]),
+        // OpenSubsonic: "explicit" | "clean" | "".
+        explicit: v["explicitStatus"].as_str().and_then(crate::explicit::from_tag_value),
     })
 }
 
@@ -291,6 +295,15 @@ fn jellyfin_item(v: &Value) -> Option<RemoteTrack> {
         year: vu32(&v["ProductionYear"]),
         duration_ms: v["RunTimeTicks"].as_i64().unwrap_or(0) / 10_000,
         genre: vs(&v["Genres"][0]),
+        // Jellyfin has no advisory field of its own; some libraries carry it as
+        // a tag ("Explicit") or in OfficialRating.
+        explicit: v["Tags"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t.as_str())
+            .find_map(crate::explicit::from_tag_value)
+            .or_else(|| v["OfficialRating"].as_str().and_then(crate::explicit::from_tag_value)),
     })
 }
 
@@ -425,7 +438,7 @@ impl Client {
                         &[
                             ("IncludeItemTypes", "Audio"),
                             ("Recursive", "true"),
-                            ("Fields", "ProductionYear,ParentIndexNumber,Genres"),
+                            ("Fields", "ProductionYear,ParentIndexNumber,Genres,Tags,OfficialRating"),
                             ("SortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber"),
                             ("EnableUserData", "false"),
                             ("StartIndex", &s),
@@ -722,6 +735,7 @@ pub fn sync(db: &mut Db, covers: &CoverCache, server: &Server, mut progress: imp
                 genre: t.genre.as_deref(),
                 composer: None,
                 format: None, sample_rate: None, bit_depth: None, bitrate: None,
+                explicit: t.explicit,
             },
             now,
         )

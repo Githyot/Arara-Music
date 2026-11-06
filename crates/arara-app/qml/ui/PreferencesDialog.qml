@@ -305,6 +305,24 @@ Item {
                             onMoved: (v) => dlg.set("lyricsoffset", v)
                         }
                     }
+                    Group {
+                        visible: dlg.page === "lyrics"
+                        title: "Conteúdo explícito"
+                        SwitchRow {
+                            title: "Mostrar o selo E"
+                            subtitle: "Ao lado do nome das músicas marcadas como explícitas no arquivo ou no servidor"
+                            checked: dlg.get("explicit")
+                            onToggled: dlg.set("explicit", !checked)
+                        }
+                        SwitchRow {
+                            title: "Detectar pela letra"
+                            subtitle: "Marca também as músicas cuja letra tem palavrões, quando o arquivo não diz nada"
+                            enabled: dlg.get("explicit")
+                            opacity: enabled ? 1 : 0.5
+                            checked: dlg.get("explicitlyrics")
+                            onToggled: dlg.set("explicitlyrics", !checked)
+                        }
+                    }
 
                     // ======== Biblioteca ========
                     Group {

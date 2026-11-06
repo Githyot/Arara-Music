@@ -11,4 +11,13 @@ QtObject {
     property bool lyricsInPanel: true
     // Player
     property bool remainingTime: true  // "-1:23" instead of the total length
+    // Explicit "E" badge
+    property bool showExplicit: true
+    property bool explicitLyrics: true // also when only the lyrics look explicit
+    // trackId → explicit state changed in this session (menu, lyrics just
+    // fetched), so queue/list copies of the track update at once.
+    property var explicitOverride: ({})
+    function setExplicit(id, kind) {
+        var o = Object.assign({}, explicitOverride); o[Number(id)] = kind; explicitOverride = o
+    }
 }

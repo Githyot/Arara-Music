@@ -53,7 +53,11 @@ Rectangle {
         Column {
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width - 60
-            Text { width: parent.width; elide: Text.ElideRight; text: bar.track ? bar.track.title : "Nada tocando"; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize; font.weight: Font.DemiBold }
+            Row {
+                width: parent.width; spacing: 6
+                Text { id: barTitle; width: Math.min(implicitWidth, parent.width - (barE.visible ? barE.width + 6 : 0)); elide: Text.ElideRight; text: bar.track ? bar.track.title : "Nada tocando"; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize; font.weight: Font.DemiBold }
+                ExplicitBadge { id: barE; anchors.verticalCenter: barTitle.verticalCenter; track: bar.track; size: 14; ink: Theme.headerBg }
+            }
             Text { width: parent.width; elide: Text.ElideRight; text: bar.track ? bar.track.artist : ""; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1 }
         }
         MouseArea { width: 1; height: 1 }

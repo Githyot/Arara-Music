@@ -93,6 +93,17 @@ pub mod qobject {
         #[cxx_name = "setStarred"]
         fn set_starred(self: Pin<&mut Library>, track_id: i64, starred: bool) -> bool;
 
+        /// Mark a track explicit by hand: mode 1 yes, 0 no, -1 back to automatic.
+        /// Returns the new state (0 none, 1 explicit, 2 only the lyrics look explicit).
+        #[qinvokable]
+        #[cxx_name = "setExplicit"]
+        fn set_explicit(self: Pin<&mut Library>, track_id: i64, mode: i32) -> i32;
+
+        /// Current explicit state of a track (same values as above).
+        #[qinvokable]
+        #[cxx_name = "explicitOf"]
+        fn explicit_of(self: &Library, track_id: i64) -> i32;
+
         #[qinvokable]
         #[cxx_name = "recordPlay"]
         fn record_play(self: &Library, track_id: i64);
@@ -703,7 +714,7 @@ impl qobject::Library {
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
             "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
             "gain": t.track_gain, "albumGain": t.album_gain, "year": t.year, "genre": t.genre,
-            "quality": t.quality().0, "qualityDetail": t.quality().1,
+            "quality": t.quality().0, "qualityDetail": t.quality().1, "explicit": t.explicit,
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
@@ -802,6 +813,19 @@ impl qobject::Library {
             Some(db) if db.set_starred(track_id, starred).is_ok() => starred,
             _ => !starred,
         }
+    }
+
+    pub fn set_explicit(self: Pin<&mut Self>, track_id: i64, mode: i32) -> i32 {
+        if let Some(db) = &self.db {
+            let v = match mode { 1 => Some(true), 0 => Some(false), _ => None };
+            let _ = db.set_explicit_user(track_id, v);
+        }
+        self.explicit_of(track_id)
+    }
+
+    pub fn explicit_of(&self, track_id: i64) -> i32 {
+        let Some(db) = &self.db else { return 0 };
+        db.track(track_id).ok().flatten().map(|t| t.explicit as i32).unwrap_or(0)
     }
 
     pub fn record_play(&self, track_id: i64) {

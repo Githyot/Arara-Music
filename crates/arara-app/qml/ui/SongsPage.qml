@@ -169,9 +169,11 @@ Item {
             required property string url
             required property bool remote
             required property string quality
+            required property int explicit
             readonly property var track: ({ id: Number(trackId), title: title, artist: artist, album: album,
                                             albumId: Number(albumId) >= 0 ? Number(albumId) : null, duration: Number(duration),
-                                            starred: starred, cover: cover, coverBig: coverBig, url: url, remote: remote, quality: quality })
+                                            starred: starred, cover: cover, coverBig: coverBig, url: url, remote: remote, quality: quality,
+                                            explicit: explicit })
             width: lv.width; height: 54
             readonly property bool first: index === 0
             readonly property bool last: index === model.count - 1

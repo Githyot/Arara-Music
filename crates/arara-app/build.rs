@@ -13,6 +13,7 @@ fn main() {
         "qml/ui/AlbumGrid.qml",
         "qml/ui/AlbumPage.qml",
         "qml/ui/TrackRow.qml",
+        "qml/ui/ExplicitBadge.qml",
         "qml/ui/SongsPage.qml",
         "qml/ui/PlayerBar.qml",
         "qml/ui/CoverArt.qml",

@@ -18,6 +18,8 @@ pub mod qobject {
         type QVariant = cxx_qt_lib::QVariant;
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qlist.h");
+        type QList_i32 = cxx_qt_lib::QList<i32>;
     }
 
     unsafe extern "RustQt" {
@@ -58,6 +60,18 @@ pub mod qobject {
         #[cxx_name = "setStarredAt"]
         fn set_starred_at(self: Pin<&mut TrackModel>, row: i32, starred: bool);
 
+        /// Update a row's explicit state in place (after the user changes it).
+        #[qinvokable]
+        #[cxx_name = "setExplicitAt"]
+        fn set_explicit_at(self: Pin<&mut TrackModel>, row: i32, kind: i32);
+
+        #[inherit]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(self: Pin<&mut TrackModel>, top_left: &QModelIndex, bottom_right: &QModelIndex, roles: &QList_i32);
+
+        #[inherit]
+        fn index(self: &TrackModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
+
         #[inherit]
         #[cxx_name = "beginResetModel"]
         fn begin_reset_model(self: Pin<&mut TrackModel>);
@@ -83,10 +97,10 @@ use arara_core::db::{Db, TrackRow};
 use arara_core::{remote, Paths};
 use core::pin::Pin;
 use cxx_qt::CxxQtType;
-use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
+use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QVariant};
 use std::path::PathBuf;
 
-const ROLES: &[&str] = &["trackId", "title", "artist", "album", "albumId", "duration", "starred", "cover", "coverBig", "url", "remote", "quality"];
+const ROLES: &[&str] = &["trackId", "title", "artist", "album", "albumId", "duration", "starred", "cover", "coverBig", "url", "remote", "quality", "explicit"];
 
 pub struct TrackModelRust {
     count: i32,
@@ -123,7 +137,7 @@ impl TrackModelRust {
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
             "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
             "gain": t.track_gain, "albumGain": t.album_gain, "year": t.year, "genre": t.genre,
-            "quality": t.quality().0, "qualityDetail": t.quality().1,
+            "quality": t.quality().0, "qualityDetail": t.quality().1, "explicit": t.explicit,
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
@@ -199,6 +213,19 @@ impl qobject::TrackModel {
         }
     }
 
+    pub fn set_explicit_at(mut self: Pin<&mut Self>, row: i32, kind: i32) {
+        {
+            let mut rust = self.as_mut().rust_mut();
+            let Some(r) = rust.rows.get_mut(row as usize) else { return };
+            r.explicit = kind as i64;
+        }
+        let idx = self.index(row, 0, &QModelIndex::default());
+        let role = 256 + ROLES.iter().position(|r| *r == "explicit").unwrap() as i32;
+        let mut roles = QList::<i32>::default();
+        roles.append(role);
+        self.as_mut().data_changed(&idx, &idx, &roles);
+    }
+
     pub fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let Some(t) = self.rows.get(index.row() as usize) else { return QVariant::default() };
         let s = |v: &str| QVariant::from(&QString::from(v));
@@ -215,6 +242,7 @@ impl qobject::TrackModel {
             Some("url") => s(&self.resolver.url(&t.path)),
             Some("remote") => QVariant::from(&remote::is_remote(&t.path)),
             Some("quality") => s(t.quality().0),
+            Some("explicit") => QVariant::from(&(t.explicit as i32)),
             _ => QVariant::default(),
         }
     }

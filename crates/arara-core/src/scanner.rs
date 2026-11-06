@@ -63,6 +63,7 @@ struct Parsed {
     sample_rate: Option<u32>,
     bit_depth: Option<u8>,
     bitrate: Option<u32>,
+    explicit: Option<bool>,
     /// Hash of the album thumbnail written by the worker (first track of each album only).
     cover_hash: Option<String>,
 }
@@ -150,6 +151,19 @@ fn parse_file(
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
 
+    // Parental advisory: iTunes rtng / ITUNESADVISORY (lofty maps both to
+    // ParentalAdvisory; Vorbis comments keep ITUNESADVISORY as an unknown key),
+    // or a plain EXPLICIT / CONTENTRATING field.
+    let explicit = tag.and_then(|t| {
+        t.get_string(&ItemKey::ParentalAdvisory)
+            .and_then(crate::explicit::from_tag_value)
+            .or_else(|| {
+                ["ITUNESADVISORY", "EXPLICIT", "CONTENTRATING", "CONTENT RATING", "ADVISORY"].iter().find_map(|k| {
+                    t.get_string(&ItemKey::Unknown((*k).to_string())).and_then(crate::explicit::from_tag_value)
+                })
+            })
+    });
+
     let (title, artist, album_artist, album, track_no, disc_no, year, tg, ag, picture, genre, composer) =
         match tag {
             Some(t) => {
@@ -198,7 +212,14 @@ fn parse_file(
             None => (stem, String::new(), String::new(), None, None, None, None, None, None, None, None, None),
         };
 
+    // Store titles like "Song (Explicit)" or "Song [Explicit Version]".
+    let explicit = explicit.or_else(|| {
+        let l = title.to_lowercase();
+        (l.contains("(explicit") || l.contains("[explicit") || l.contains("(explícit")).then_some(true)
+    });
+
     Some(Parsed {
+        explicit,
         path: path.to_string_lossy().into_owned(),
         mtime,
         size,
@@ -336,6 +357,7 @@ pub fn scan(
                     sample_rate: p.sample_rate,
                     bit_depth: p.bit_depth,
                     bitrate: p.bitrate,
+                    explicit: p.explicit,
                 },
                 now,
             )?;

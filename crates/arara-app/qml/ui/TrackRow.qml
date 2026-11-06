@@ -91,12 +91,25 @@ Rectangle {
         Column {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.max(60, row.width - handle.width - (row.showArt ? 38 : 22) - 26 - rightRow.width - 24)
-            Text {
+            Row {
                 width: parent.width
-                text: row.track ? row.track.title : ""
-                color: row.playing ? row.hiC : row.fgC
-                elide: Text.ElideRight
-                font.family: Theme.font; font.pointSize: Theme.fontSize
+                spacing: 6
+                Text {
+                    id: titleText
+                    width: Math.min(implicitWidth, parent.width - (eBadge.visible ? eBadge.width + parent.spacing : 0))
+                    text: row.track ? row.track.title : ""
+                    color: row.playing ? row.hiC : row.fgC
+                    elide: Text.ElideRight
+                    font.family: Theme.font; font.pointSize: Theme.fontSize
+                }
+                ExplicitBadge {
+                    id: eBadge
+                    anchors.verticalCenter: titleText.verticalCenter
+                    track: row.track
+                    size: 14
+                    fill: row.dimC
+                    ink: row.onDark ? "#3a3a3a" : Theme.cardBg
+                }
             }
             Text {
                 width: parent.width

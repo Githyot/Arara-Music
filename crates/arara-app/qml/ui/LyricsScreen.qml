@@ -81,10 +81,17 @@ Item {
             }
             Column {
                 width: parent.width; spacing: 2
-                Text {
-                    width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
-                    text: ls.track ? ls.track.title : ""
-                    color: "white"; font.family: Theme.font; font.pointSize: Theme.headingSize + 1; font.weight: Theme.headingWeight
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8
+                    Text {
+                        id: lsTitle
+                        width: Math.min(implicitWidth, leftCol.width - (lsE.visible ? lsE.width + 8 : 0))
+                        elide: Text.ElideRight
+                        text: ls.track ? ls.track.title : ""
+                        color: "white"; font.family: Theme.font; font.pointSize: Theme.headingSize + 1; font.weight: Theme.headingWeight
+                    }
+                    ExplicitBadge { id: lsE; anchors.verticalCenter: lsTitle.verticalCenter; track: ls.track; size: 17; fill: Qt.rgba(1, 1, 1, 0.75); ink: "#2b2b2b" }
                 }
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight

@@ -135,11 +135,25 @@ Rectangle {
             }
             Column {
                 width: parent.width; spacing: 4
-                Text {
-                    width: parent.width; horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
-                    text: panel.track ? panel.track.title : "Nada tocando"
-                    color: "white"; font.family: Theme.displayFont; font.pointSize: Theme.headingSize + 1; font.weight: Theme.headingWeight
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8
+                    Text {
+                        id: panelTitle
+                        width: Math.min(implicitWidth, panel.width - 48 - (panelE.visible ? panelE.width + 8 : 0))
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                        text: panel.track ? panel.track.title : "Nada tocando"
+                        color: "white"; font.family: Theme.displayFont; font.pointSize: Theme.headingSize + 1; font.weight: Theme.headingWeight
+                    }
+                    ExplicitBadge {
+                        id: panelE
+                        anchors.verticalCenter: panelTitle.verticalCenter
+                        track: panel.track
+                        size: 17
+                        fill: Qt.rgba(1, 1, 1, 0.75)
+                        ink: "#2b2b2b"
+                    }
                 }
                 // Artist and album: click either to go to the artist's or the album's page.
                 Text {

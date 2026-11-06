@@ -13,6 +13,13 @@ Popup {
     signal addToPlaylist(var track, int playlistId)
     signal newPlaylistWith(var track)
     signal goToAlbum(var track)
+    signal toggleExplicit(var track, bool shown)
+    // Is the E badge showing for this track right now?
+    readonly property bool explicitShown: {
+        if (!track) return false
+        var o = Prefs.explicitOverride, k = o[Number(track.id)] !== undefined ? o[Number(track.id)] : Number(track.explicit || 0)
+        return k === 1 || (k === 2 && Prefs.explicitLyrics)
+    }
 
     width: 240
     padding: 6
@@ -24,7 +31,7 @@ Popup {
     function openAt(t, x, y, lists) {
         track = t; playlists = lists; showPlaylists = false
         menu.x = Math.min(x, parent.width - width - 8)
-        menu.y = Math.min(y, parent.height - 260)
+        menu.y = Math.min(y, parent.height - 300)
         open()
     }
 
@@ -60,6 +67,11 @@ Popup {
             Item_ { label: "Adicionar à playlist"; submenu: true; onTriggered: menu.showPlaylists = true }
             Rectangle { width: menu.width - 12; height: 1; color: Theme.border; opacity: 0.6 }
             Item_ { label: "Ir para o álbum"; visible: menu.track && menu.track.albumId; onTriggered: { menu.goToAlbum(menu.track); menu.close() } }
+            Item_ {
+                visible: Prefs.showExplicit && !!menu.track && !menu.track.free && menu.track.id > 0
+                label: menu.explicitShown ? "Tirar o selo E" : "Marcar como explícita"
+                onTriggered: { menu.toggleExplicit(menu.track, menu.explicitShown); menu.close() }
+            }
         }
         Column {
             visible: menu.showPlaylists

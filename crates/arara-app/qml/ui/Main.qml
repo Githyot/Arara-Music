@@ -34,6 +34,7 @@ Window {
         tilesize: "medium", fontscale: 1.0, compact: false, reducemotion: false,
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
         autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
+        explicit: true, explicitlyrics: true,
         hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close"
     })
     property var prefs: prefDefaults
@@ -122,6 +123,8 @@ Window {
     Binding { target: Prefs; property: "lyricsDuets"; value: win.prefs.duets }
     Binding { target: Prefs; property: "lyricsInPanel"; value: win.prefs.lyricspanel }
     Binding { target: Prefs; property: "remainingTime"; value: win.prefs.remaining }
+    Binding { target: Prefs; property: "showExplicit"; value: win.prefs.explicit }
+    Binding { target: Prefs; property: "explicitLyrics"; value: win.prefs.explicitlyrics }
 
     Library {
         id: library
@@ -164,6 +167,9 @@ Window {
         onLyricsReady: (trackId, json) => {
             // qint64 arrives as an object in JS; compare as numbers
             if (player.current && player.current.id === Number(trackId)) { win.lyrics = JSON.parse(json); win.loadingLyrics = false }
+            // Lyrics just fetched may reveal an explicit song: refresh its badge.
+            var e = library.explicitOf(Number(trackId))
+            if (e !== (Prefs.explicitOverride[Number(trackId)] !== undefined ? Prefs.explicitOverride[Number(trackId)] : -1)) Prefs.setExplicit(trackId, e)
         }
         onMediaCommand: (cmd, arg) => {
             var us = Number(arg)
@@ -893,6 +899,11 @@ Window {
         parent: frame
         onPlayNext: (t) => player.playNext(t)
         onEnqueue: (t) => player.enqueue(t)
+        onToggleExplicit: (t, shown) => {
+            var e = library.setExplicit(t.id, shown ? 0 : 1)
+            Prefs.setExplicit(t.id, e)
+            toast.show(shown ? "Selo E removido" : "Marcada como explícita")
+        }
         onAddToPlaylist: (t, pid) => {
             library.addToPlaylist(pid, JSON.stringify([t.id]))
             var p = sidebar.playlists.find(function (x) { return x.id === pid })
