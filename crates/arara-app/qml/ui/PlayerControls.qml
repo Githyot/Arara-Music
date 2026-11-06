@@ -43,6 +43,39 @@ Column {
             text: pc.fmt(seekBar.pressed ? seekBar.value : pc.position)
             color: pc.dim; font.family: Theme.font; font.pointSize: Theme.fontSize - 2
         }
+        // Speed pill between the times: "1×" stays quiet, any other speed is
+        // highlighted so it is never forgotten. Opens the speed popover.
+        Rectangle {
+            id: speedPill
+            readonly property bool changed: Math.abs(Prefs.playbackRate - 1) > 0.001
+            anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: -3 }
+            width: speedText.implicitWidth + 16; height: speedText.implicitHeight + 4
+            radius: height / 2
+            color: changed ? (pc.onDark ? Qt.rgba(1, 1, 1, 0.9) : Theme.accent)
+                           : speedMa.containsMouse ? (pc.onDark ? Qt.rgba(1, 1, 1, 0.18) : Theme.hover) : "transparent"
+            border.width: changed ? 0 : 1
+            border.color: pc.onDark ? Qt.rgba(1, 1, 1, 0.3) : Theme.border
+            Text {
+                id: speedText
+                anchors.centerIn: parent
+                text: Prefs.rateLabel(Prefs.playbackRate)
+                color: speedPill.changed ? (pc.onDark ? "#1d1d20" : Theme.accentInk) : pc.dim
+                font.family: Theme.font; font.pointSize: Theme.fontSize - 2; font.weight: Font.DemiBold
+            }
+            MouseArea {
+                id: speedMa
+                anchors.fill: parent; anchors.margins: -4
+                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                // middle click: back to normal
+                onClicked: (e) => { if (e.button === Qt.MiddleButton) Prefs.requestRate(1); else speedPop.openFor(speedPill) }
+                onWheel: (w) => Prefs.requestRate(Prefs.playbackRate + (w.angleDelta.y > 0 ? 0.05 : -0.05))
+            }
+            ToolTip.visible: speedMa.containsMouse && !speedPop.visible
+            ToolTip.delay: 600
+            ToolTip.text: "Velocidade de reprodução"
+        }
+        SpeedPopup { id: speedPop }
         Text {
             anchors { right: parent.right; bottom: parent.bottom }
             text: pc.duration <= 0 ? "0:00" : Prefs.remainingTime ? "-" + pc.fmt(pc.duration - (seekBar.pressed ? seekBar.value : pc.position)) : pc.fmt(pc.duration)

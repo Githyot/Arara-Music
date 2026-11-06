@@ -20,6 +20,7 @@ fn main() {
         "qml/ui/FastScroll.qml",
         "qml/ui/GroupsPage.qml",
         "qml/ui/PlayerControls.qml",
+        "qml/ui/SpeedPopup.qml",
         "qml/ui/PlayerPanel.qml",
         "qml/ui/LyricsScreen.qml",
         "qml/ui/VolumeSlider.qml",

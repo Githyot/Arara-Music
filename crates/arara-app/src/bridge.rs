@@ -171,6 +171,11 @@ pub mod qobject {
         #[cxx_name = "mprisUpdate"]
         fn mpris_update(self: &Library, status: &QString, track_json: &QString, can_next: bool, can_prev: bool, volume: f64);
 
+        /// Playback speed changed in the app (1.0 = normal).
+        #[qinvokable]
+        #[cxx_name = "mprisRate"]
+        fn mpris_rate(self: &Library, rate: f64);
+
         #[qinvokable]
         #[cxx_name = "mprisPosition"]
         fn mpris_position(self: &Library, ms: i64, seeked: bool);
@@ -537,6 +542,7 @@ impl qobject::Library {
                 Command::Previous => ("previous", 0),
                 Command::Seek(us) => ("seek", us),
                 Command::SetPosition(us) => ("setposition", us),
+                Command::SetRate(milli) => ("setrate", milli),
                 Command::Raise => ("raise", 0),
                 Command::Quit => ("quit", 0),
             };
@@ -1017,6 +1023,12 @@ impl qobject::Library {
             length_us: t.get("duration").and_then(|x| x.as_i64()).unwrap_or(0) * 1000,
         });
         m.update(&status.to_string(), meta, can_next, can_prev, volume);
+    }
+
+    pub fn mpris_rate(&self, rate: f64) {
+        if let Some(m) = &self.mpris {
+            m.set_rate(rate)
+        }
     }
 
     pub fn mpris_position(&self, ms: i64, seeked: bool) {

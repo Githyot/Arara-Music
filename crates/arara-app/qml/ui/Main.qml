@@ -34,7 +34,7 @@ Window {
         tilesize: "medium", fontscale: 1.0, compact: false, reducemotion: false,
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
         autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
-        explicit: true, explicitlyrics: true,
+        explicit: true, explicitlyrics: true, rate: 1.0,
         hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close"
     })
     property var prefs: prefDefaults
@@ -125,6 +125,17 @@ Window {
     Binding { target: Prefs; property: "remainingTime"; value: win.prefs.remaining }
     Binding { target: Prefs; property: "showExplicit"; value: win.prefs.explicit }
     Binding { target: Prefs; property: "explicitLyrics"; value: win.prefs.explicitlyrics }
+    Binding { target: Prefs; property: "playbackRate"; value: Prefs.clampRate(Number(win.prefs.rate) || 1) }
+    Connections {
+        target: Prefs
+        function onRequestRate(r) { win.setRate(r) }
+        function onPlaybackRateChanged() { media.applyRate() }
+    }
+    function setRate(r) {
+        r = Prefs.clampRate(r)
+        if (Math.abs(r - Prefs.playbackRate) < 0.001) return
+        win.setPref("rate", r)
+    }
 
     Library {
         id: library
@@ -182,6 +193,7 @@ Window {
             case "previous": player.prev(); break
             case "seek": player.seekTo(media.position + us / 1000); break
             case "setposition": player.seekTo(us / 1000); break
+            case "setrate": win.setRate(us / 1000); break
             case "raise": win.show(); win.raise(); win.requestActivate(); break
             case "quit": win.close(); break
             }
@@ -293,6 +305,27 @@ Window {
         id: media
         // Qt picks the default output only once, at startup. Follow the output chosen in
         // GNOME (headset, HDMI, line out…) whenever it changes, even mid-song.
+        // Speed 0.25×–2×. Lyrics follow media.position, which is in song time,
+        // so they stay in sync at any speed.
+        // Set imperatively, not bound: the GStreamer backend (older Qt) drops the
+        // speed when a new song loads while the property keeps the old value, so
+        // the speed is applied again once every new song starts moving.
+        onPlaybackRateChanged: library.mprisRate(playbackRate)
+        property bool rateDirty: true
+        onSourceChanged: rateDirty = true
+        // Once the new song is really running (position moves), the pipeline accepts the speed.
+        onPositionChanged: if (rateDirty && position > 0 && playbackState === MediaPlayer.PlayingState) { rateDirty = false; applyRate() }
+        function applyRate() {
+            var r = Prefs.playbackRate
+            if (Math.abs(r - 1) > 0.001 && Math.abs(playbackRate - r) < 0.001) playbackRate = 1
+            playbackRate = r
+        }
+        // Qt 6.10+ (FFmpeg backend) can keep the pitch when the speed changes;
+        // older Qt with GStreamer does it on its own (scaletempo).
+        Component.onCompleted: {
+            if (media.pitchCompensation !== undefined) { media.pitchCompensation = true; Prefs.pitchKept = media.pitchCompensation === true }
+            applyRate(); library.mprisRate(playbackRate)
+        }
         audioOutput: AudioOutput { id: audio; volume: win.userVolume * win.gainFactor; device: sysAudio.defaultAudioOutput }
         // A missing file or unreachable server: say so and move on, but don't
         // spin through a whole queue of broken tracks.
@@ -930,8 +963,8 @@ Window {
         onRescan: library.changeLibraryDir(library.libraryDir)
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
-            "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7",
+            "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
+        onAbout: prompt.info("Arara Music 0.7.3",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     PreferencesDialog {
@@ -996,6 +1029,10 @@ Window {
     Shortcut { sequence: "Ctrl+Right"; onActivated: player.next() }
     Shortcut { sequence: "Ctrl+Left"; onActivated: player.prev() }
     Shortcut { sequence: "Ctrl+L"; onActivated: win.lyricsMode = !win.lyricsMode }
+    // Speed: [ slower, ] faster, \ back to normal (5% steps)
+    Shortcut { sequence: "["; enabled: !search.activeFocus; onActivated: win.setRate(Prefs.playbackRate - 0.05) }
+    Shortcut { sequence: "]"; enabled: !search.activeFocus; onActivated: win.setRate(Prefs.playbackRate + 0.05) }
+    Shortcut { sequence: "\\"; enabled: !search.activeFocus; onActivated: win.setRate(1) }
     Shortcut { sequence: "Escape"; onActivated: { if (prefsDialog.visible) prefsDialog.close(); else if (lyricsEditor.visible) lyricsEditor.visible = false; else if (win.lyricsMode) win.lyricsMode = false; else if (nav.canGoBack) nav.back() } }
     Shortcut { sequences: ["Alt+Left", "Back"]; enabled: nav.canGoBack; onActivated: nav.back() }
     Shortcut { sequence: "Ctrl+Q"; onActivated: win.close() }

@@ -12,6 +12,7 @@ pub enum Command {
     Previous,
     Seek(i64),
     SetPosition(i64),
+    SetRate(i64),
     Raise,
     Quit,
 }
@@ -69,6 +70,7 @@ impl Mpris {
     pub fn update(&self, _status: &str, _meta: Option<TrackMeta>, _can_next: bool, _can_prev: bool, _volume: f64) {}
     pub fn lyric_line(&self, _line: &str, _next: &str, _title: &str, _artist: &str) {}
     pub fn set_position(&self, _us: i64) {}
+    pub fn set_rate(&self, _rate: f64) {}
     pub fn seeked(&self, _us: i64) {}
 }
 

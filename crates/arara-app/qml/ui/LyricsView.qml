@@ -12,6 +12,7 @@ Item {
     // Playback position shifted by the user's sync adjustment. The player only
     // reports its position every ~100 ms, so between reports the clock runs on
     // by itself every frame: the words fill and grow smoothly, not in steps.
+    // That clock runs at the playback speed, so lyrics stay in sync at 0.5× or 2×.
     property real at: position + Prefs.lyricsOffset
     property real _base: 0
     property real _baseT: 0
@@ -22,7 +23,7 @@ Item {
     FrameAnimation {
         id: clock
         running: view.playing && view.visible && view.lyrics.kind === "synced"
-        onTriggered: view.at = view._base + Math.min(400, Date.now() - view._baseT) + Prefs.lyricsOffset
+        onTriggered: view.at = view._base + Math.min(400, Date.now() - view._baseT) * Prefs.playbackRate + Prefs.lyricsOffset
         onRunningChanged: if (!running) view.at = view.position + Prefs.lyricsOffset
     }
     property bool loading: false

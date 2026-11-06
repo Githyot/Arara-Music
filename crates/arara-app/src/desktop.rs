@@ -15,6 +15,8 @@ use zbus::object_server::SignalContext;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
 const PATH: &str = "/org/mpris/MediaPlayer2";
+pub const MIN_RATE: f64 = 0.25;
+pub const MAX_RATE: f64 = 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
@@ -28,6 +30,8 @@ pub enum Command {
     Seek(i64),
     /// absolute position, microseconds
     SetPosition(i64),
+    /// playback speed, thousandths (1000 = normal)
+    SetRate(i64),
     Raise,
     Quit,
 }
@@ -161,6 +165,7 @@ struct Player {
     meta: Option<TrackMeta>,
     position: Arc<AtomicI64>,
     volume: f64,
+    rate: f64,
     can_next: bool,
     can_prev: bool,
 }
@@ -211,7 +216,17 @@ impl Player {
     }
     #[zbus(property)]
     fn rate(&self) -> f64 {
-        1.0
+        self.rate
+    }
+    #[zbus(property)]
+    fn set_rate(&mut self, r: f64) {
+        // Spec: 0 means pause; out-of-range values are clamped.
+        if r <= 0.0 {
+            (self.handler)(Command::Pause);
+            return;
+        }
+        let r = r.clamp(MIN_RATE, MAX_RATE);
+        (self.handler)(Command::SetRate((r * 1000.0).round() as i64));
     }
     #[zbus(property)]
     fn shuffle(&self) -> bool {
@@ -248,11 +263,11 @@ impl Player {
     }
     #[zbus(property)]
     fn minimum_rate(&self) -> f64 {
-        1.0
+        MIN_RATE
     }
     #[zbus(property)]
     fn maximum_rate(&self) -> f64 {
-        1.0
+        MAX_RATE
     }
     #[zbus(property)]
     fn can_go_next(&self) -> bool {
@@ -308,6 +323,7 @@ impl Mpris {
                     meta: None,
                     position: position.clone(),
                     volume: 1.0,
+                    rate: 1.0,
                     can_next: false,
                     can_prev: false,
                 },
@@ -359,6 +375,17 @@ impl Mpris {
         l.artist = artist.into();
         let _ = zbus::block_on(LyricsIface::lyric_changed(ctx, line, next, title, artist));
         let _ = zbus::block_on(l.line_changed(ctx));
+    }
+
+    /// Current playback speed (1.0 = normal), shown by shells and widgets.
+    pub fn set_rate(&self, rate: f64) {
+        let Ok(iface) = self.conn.object_server().interface::<_, Player>(PATH) else { return };
+        let ctx = iface.signal_context();
+        let mut p = iface.get_mut();
+        if (p.rate - rate).abs() > 0.0005 {
+            p.rate = rate;
+            let _ = zbus::block_on(p.rate_changed(ctx));
+        }
     }
 
     /// Position is polled by clients (not change-notified), so this is cheap to call often.
