@@ -12,6 +12,9 @@ Item {
     // Fixed filter for category pages, e.g. genero:"Rap" or pasta:"/music/x/".
     property string baseFilter: ""
     property string heading: ""
+    // Category pages (a year, a genre…) get a big title with play buttons.
+    property string bigTitle: ""
+    property string kicker: ""
     property string sort: "artist"
     property string scope: "all"
     property bool userSorted: false
@@ -64,12 +67,34 @@ Item {
         id: bar
         anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: page.side; rightMargin: page.rightSide; topMargin: 14 }
         spacing: 8
+        Column {
+            visible: page.bigTitle !== ""
+            width: parent.width
+            spacing: 4
+            Text { visible: page.kicker !== ""; text: page.kicker.toUpperCase(); color: Theme.accentFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 2; font.weight: Font.Bold; font.letterSpacing: 0.6 }
+            Text { width: parent.width; elide: Text.ElideRight; text: page.bigTitle; color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.titleSize; font.weight: Theme.titleWeight }
+            Item { width: 1; height: 8 }
+            Row {
+                spacing: 8
+                visible: model.count > 0
+                FlatButton { text: "Reproduzir"; suggested: true; onClicked: page.play(JSON.parse(model.sliceJson(0, 500)), 0) }
+                FlatButton {
+                    visible: model.count > 1; text: "Aleatório"; color: Theme.hover
+                    onClicked: {
+                        var t = JSON.parse(model.sliceJson(0, 500))
+                        for (var i = t.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = t[i]; t[i] = t[j]; t[j] = x }
+                        page.play(t, 0)
+                    }
+                }
+            }
+            Item { width: 1; height: 6 }
+        }
         Item {
             width: parent.width; height: 34
             Text {
                 anchors { left: parent.left; verticalCenter: parent.verticalCenter; right: saveBtn.visible ? saveBtn.left : sortBtn.left; rightMargin: 12 }
                 elide: Text.ElideRight
-                text: (page.heading !== "" ? page.heading + " · " : page.hasText ? "Resultados · " : "Todas as músicas · ")
+                text: (page.bigTitle !== "" ? "" : page.heading !== "" ? page.heading + " · " : page.hasText ? "Resultados · " : "Todas as músicas · ")
                       + model.count.toLocaleString(Qt.locale(), "f", 0) + (model.count === 1 ? " música" : " músicas")
                 color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize; font.weight: Font.DemiBold
             }
@@ -77,7 +102,7 @@ Item {
                 id: saveBtn
                 anchors { right: sortBtn.left; rightMargin: 4; verticalCenter: parent.verticalCenter }
                 visible: page.fullQuery !== ""
-                text: "Salvar busca"; color: hovered ? Theme.hover : "transparent"
+                text: page.bigTitle !== "" ? "Salvar como playlist" : "Salvar busca"; color: hovered ? Theme.hover : "transparent"
                 onClicked: page.saveSmart(page.fullQuery, page.effectiveSort)
             }
             Rectangle {

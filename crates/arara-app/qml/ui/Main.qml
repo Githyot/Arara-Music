@@ -355,49 +355,67 @@ Window {
         property var playlist: null
         property var server: null
         property var history: []
+        property var group: null          // {kind, name} of the open genre/year/composer/folder
+        // Sub-pages always get a back button, even when reached with no history.
+        readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group"
         // Sidebar entry the current view belongs to (an album opened from a server keeps "server").
         property string section: "albums"
 
-        function go(p) {
+        // Snapshot of the current view, taken before a navigation changes it.
+        function state() {
+            return { page: page, section: section, album: album, artist: artist, playlist: playlist, server: server, group: group,
+                     groupQuery: catSongs.baseFilter, groupTitle: catSongs.heading, groupSort: catSongs.sort }
+        }
+        function go(p, st) {
             // Reassign (not push) so bindings on history.length, like the back button, update.
-            if (p !== page) history = history.concat([{ page: page, section: section, album: album, artist: artist, playlist: playlist, server: server }])
+            if (p !== page || p === "group" || p === "album" || p === "artist") history = history.concat([st || state()])
             page = p; if (p === "songs") section = "songs"
             refresh()
-            if (p === "songs") search.forceActiveFocus()
+            if (p === "songs") search.forceActiveFocus(); else if (search.activeFocus && search.text === "") win.contentItem.forceActiveFocus()
         }
         function back() {
             var h = history.length > 0 ? history[history.length - 1] : null
             history = history.slice(0, -1)
-            if (!h) { root("albums"); return }
-            page = h.page; section = h.section || h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; refresh()
+            if (!h) {
+                // No history (e.g. restored state): go up to the parent listing.
+                root(page === "group" && group ? group.kind : page === "artist" ? "artists" : page === "album" && section !== "album" ? section : "albums")
+                return
+            }
+            win.lyricsMode = false
+            if ((h.page === "group" || h.page === "added") && h.groupQuery !== undefined) catSongs.open(h.groupQuery, h.groupTitle, h.groupSort)
+            if (h.page === "album" && h.album) { albumPage.tracks = JSON.parse(library.albumTracksJson(h.album.id)) }
+            if (h.page === "artist" && h.artist) { artistAlbums.albums = JSON.parse(library.artistAlbumsJson(h.artist.id)) }
+            page = h.page; section = h.section || h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; group = h.group || null; refresh()
         }
         function root(p) {
             win.lyricsMode = false; page = p; section = p; history = []; win.drawerOpen = false
             if (p === "added") { catSongs.open("", "Adicionadas recentemente", "added") }
             refresh()
-            if (p === "songs") search.forceActiveFocus()
+            if (p === "songs") search.forceActiveFocus(); else if (search.activeFocus && search.text === "") win.contentItem.forceActiveFocus()
         }
         // Category entry (a genre, a year, a composer or a folder) → its songs.
         function openGroup(kind, g) {
             var q = kind === "year" ? "ano:" + g.key : kind === "folder" ? "pasta:\"" + g.key + "\"" : (kind === "genre" ? "genero:" : "compositor:") + "\"" + g.key + "\""
             var label = kind === "genre" ? "Gênero" : kind === "year" ? "Ano" : kind === "composer" ? "Compositor" : "Pasta"
-            catSongs.open(q, label + ": " + g.name, kind === "folder" ? "album" : "artist")
             go("group")
+            group = { kind: kind, name: g.name, label: label }
+            section = kind
+            catSongs.open(q, label + ": " + g.name, kind === "folder" ? "album" : "artist")
         }
         function rootPlaylist(p) { win.lyricsMode = false; playlist = p; page = "playlist"; section = "playlist"; history = []; win.drawerOpen = false; refresh() }
         function rootServer(sv) { win.lyricsMode = false; server = sv; page = "server"; section = "server"; history = []; win.drawerOpen = false; refresh() }
-        function openAlbum(a) { album = a; albumPage.tracks = JSON.parse(library.albumTracksJson(a.id)); albumPage.contentY = 0; go("album") }
+        function openAlbum(a) { var st = state(); album = a; albumPage.tracks = JSON.parse(library.albumTracksJson(a.id)); albumPage.contentY = 0; go("album", st) }
         function openAlbumById(id) {
             var a = albumGrid.albums.find(function (x) { return x.id === id })
             if (a) openAlbum(a)
         }
-        function openArtist(a) { artist = a; artistAlbums.albums = JSON.parse(library.artistAlbumsJson(a.id)); go("artist") }
+        function openArtist(a) { var st = state(); artist = a; artistAlbums.albums = JSON.parse(library.artistAlbumsJson(a.id)); go("artist", st) }
         function openArtistById(id) {
             var a = artistGrid.artists.find(function (x) { return x.id === id })
             if (a) openArtist(a)
         }
-        function openPlaylist(p) { playlist = p; go("playlist") }
-        function openServer(s) { server = s; go("server") }
+        function openPlaylist(p) { var st = state(); playlist = p; go("playlist", st) }
+        function openServer(s) { var st = state(); server = s; go("server", st) }
         function refresh() {
             if (page === "server" && server) {
                 var all = JSON.parse(library.serversJson())
@@ -426,12 +444,25 @@ Window {
             : page === "mostplayed" ? "Mais tocadas"
             : page === "added" ? "Adicionadas recentemente"
             : page === "genre" ? "Gêneros" : page === "year" ? "Anos" : page === "composer" ? "Compositores" : page === "folder" ? "Pastas"
-            : page === "group" ? ""
+            : page === "group" && group ? group.name
             : page === "playlist" ? "Playlist"
             : page === "server" ? "Servidor"
             : page === "songs" ? "Músicas" : page === "free" ? "" : "Álbuns"
     }
 
+    // Now-playing panel → artist / album pages of the current track.
+    function albumOf(t) { return t && t.albumId !== null && t.albumId !== undefined ? albumGrid.albums.find(function (x) { return x.id === t.albumId }) : null }
+    function goToAlbumOf(t) {
+        var a = albumOf(t)
+        if (a) { win.lyricsMode = false; nav.openAlbum(a) } else toast.show("Álbum não encontrado na biblioteca")
+    }
+    function goToArtistOf(t) {
+        if (!t) return
+        var arts = artistGrid.artists
+        var ar = arts.find(function (x) { return x.name === t.artist })
+        if (!ar) { var a = albumOf(t); if (a && a.artistId) ar = arts.find(function (x) { return x.id === a.artistId }) }
+        if (ar) { win.lyricsMode = false; nav.openArtist(ar) } else toast.show("Artista não encontrado na biblioteca")
+    }
     function setVolume(v) { win.userVolume = v; volumeSave.restart(); mpris.push() }
     function saveSmart(q, sort, suggested) {
         prompt.ask("Salvar como playlist inteligente", "Ela se atualiza sozinha com as músicas que combinam com “" + q + "”.", suggested, "Salvar", function (name) {
@@ -513,7 +544,7 @@ Window {
                 leading: [
                     WindowControls { visible: win.csd && Theme.apple && win.narrow; window: win; Layout.leftMargin: 8; Layout.rightMargin: 4 },
                     FlatButton { icon: "sidebar"; visible: win.narrow; checked: win.drawerOpen; onClicked: win.drawerOpen = !win.drawerOpen },
-                    FlatButton { icon: "back"; visible: nav.history.length > 0; onClicked: nav.back() }
+                    FlatButton { icon: "back"; visible: nav.canGoBack; onClicked: nav.back() }
                 ]
                 trailing: [
                     Rectangle {
@@ -577,15 +608,45 @@ Window {
                 Item {
                     anchors.fill: parent
                     visible: nav.page === "artist"
-                    Text {
+                    // Artist header (AdwStatusPage-ish, left aligned): avatar, name, counts, play buttons.
+                    function artistTracks() {
+                        var out = []
+                        for (var i = 0; i < artistAlbums.albums.length; i++) out = out.concat(JSON.parse(library.albumTracksJson(artistAlbums.albums[i].id)))
+                        return out
+                    }
+                    Item {
                         id: artistTitle
-                        x: 24; y: 20
-                        text: nav.artist ? nav.artist.name : ""
-                        color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.titleSize; font.weight: Theme.titleWeight
+                        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 24; rightMargin: 24; topMargin: 20 }
+                        height: 112
+                        CoverArt {
+                            id: artistAvatar
+                            width: 112; height: 112; radius: 56; decode: 224
+                            source: nav.artist ? (nav.artist.cover || "") : ""
+                        }
+                        Column {
+                            anchors { left: artistAvatar.right; leftMargin: 20; right: parent.right; verticalCenter: parent.verticalCenter }
+                            spacing: 4
+                            Text { text: "ARTISTA"; color: Theme.accentFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 2; font.weight: Font.Bold; font.letterSpacing: 0.6 }
+                            Text { width: parent.width; elide: Text.ElideRight; text: nav.artist ? nav.artist.name : ""; color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.titleSize; font.weight: Theme.titleWeight }
+                            Text { text: artistAlbums.albums.length + (artistAlbums.albums.length === 1 ? " álbum" : " álbuns"); color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
+                            Item { width: 1; height: 4 }
+                            Row {
+                                spacing: 8
+                                FlatButton { text: "Reproduzir"; suggested: true; onClicked: player.playList(artistTitle.parent.artistTracks(), 0) }
+                                FlatButton {
+                                    text: "Aleatório"; color: Theme.hover
+                                    onClicked: {
+                                        var t = artistTitle.parent.artistTracks()
+                                        for (var i = t.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = t[i]; t[i] = t[j]; t[j] = x }
+                                        player.playList(t, 0)
+                                    }
+                                }
+                            }
+                        }
                     }
                     AlbumGrid {
                         id: artistAlbums
-                        anchors { left: parent.left; right: parent.right; top: artistTitle.bottom; bottom: parent.bottom }
+                        anchors { left: parent.left; right: parent.right; top: artistTitle.bottom; bottom: parent.bottom; topMargin: 8 }
                         onOpenAlbum: (a) => nav.openAlbum(a)
                     }
                 }
@@ -623,6 +684,8 @@ Window {
                     id: catSongs
                     anchors.fill: parent
                     visible: nav.page === "group" || nav.page === "added"
+                    bigTitle: nav.page === "group" && nav.group ? nav.group.name : nav.page === "added" ? "Recém-adicionadas" : ""
+                    kicker: nav.page === "group" && nav.group ? nav.group.label : nav.page === "added" ? "Coleção" : ""
                     playingId: player.current ? player.current.id : -1
                     onPlay: (t, i) => player.playList(t, i)
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
@@ -647,6 +710,7 @@ Window {
                     subtitle: tracks.length + (tracks.length === 1 ? " música" : " músicas")
                     emptyText: nav.page === "starred" ? "Nenhuma favorita" : nav.page === "recent" || nav.page === "mostplayed" ? "Nada tocado ainda" : nav.playlist && nav.playlist.smart ? "Nenhuma música combina com esta busca" : "Playlist vazia"
                     emptyHint: nav.page === "starred" ? "Clique na ☆ de uma música para favoritar." : nav.page === "playlist" ? "Use o menu ⋮ de uma música para adicionar aqui." : ""
+                    emptyIcon: nav.page === "starred" ? "unstar" : nav.page === "recent" ? "recent" : nav.page === "mostplayed" ? "plays" : "playlist"
                     removable: nav.page === "playlist" && !(nav.playlist && nav.playlist.smart)
                     editable: nav.page === "playlist"
                     playingId: player.current ? player.current.id : -1
@@ -753,6 +817,8 @@ Window {
             onClose: { win.panelOpen = false; library.setSetting("panel", "0") }
             onStarToggled: (t, s) => win.onStar(t, s)
             onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
+            onGoArtist: (t) => win.goToArtistOf(t)
+            onGoAlbum: (t) => win.goToAlbumOf(t)
             // the window's close button lives in the panel's corner when it is docked
             windowControls: win.csd && !Theme.apple
             allWindowButtons: win.prefs.winbuttons === "all"
@@ -919,7 +985,8 @@ Window {
     Shortcut { sequence: "Ctrl+Right"; onActivated: player.next() }
     Shortcut { sequence: "Ctrl+Left"; onActivated: player.prev() }
     Shortcut { sequence: "Ctrl+L"; onActivated: win.lyricsMode = !win.lyricsMode }
-    Shortcut { sequence: "Escape"; onActivated: { if (prefsDialog.visible) prefsDialog.close(); else if (lyricsEditor.visible) lyricsEditor.visible = false; else if (win.lyricsMode) win.lyricsMode = false; else if (nav.history.length) nav.back() } }
+    Shortcut { sequence: "Escape"; onActivated: { if (prefsDialog.visible) prefsDialog.close(); else if (lyricsEditor.visible) lyricsEditor.visible = false; else if (win.lyricsMode) win.lyricsMode = false; else if (nav.canGoBack) nav.back() } }
+    Shortcut { sequences: ["Alt+Left", "Back"]; enabled: nav.canGoBack; onActivated: nav.back() }
     Shortcut { sequence: "Ctrl+Q"; onActivated: win.close() }
     Shortcut { sequence: "Ctrl+,"; onActivated: prefsDialog.visible ? prefsDialog.close() : prefsDialog.open() }
 }

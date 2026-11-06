@@ -17,6 +17,8 @@ Rectangle {
     readonly property color dimC: onDark ? Qt.rgba(1, 1, 1, 0.62) : Theme.dimFg
     readonly property color hiC: onDark ? "white" : Theme.accentFg
     property bool playing: false
+    // On an album page the album artist is already in the header: hide it per row.
+    property string hideArtist: ""
     property bool removable: false
     property bool draggable: false
     // Drop indicator: -1 none, 0 line above, 1 line below
@@ -99,7 +101,7 @@ Rectangle {
             Text {
                 width: parent.width
                 // Files without tags have no artist/album: show just the title, centered.
-                text: !row.track ? "" : [row.track.artist, row.showArt ? row.track.album : ""].filter(function (x) { return !!x }).join(" — ")
+                text: !row.track ? "" : [row.track.artist === row.hideArtist ? "" : row.track.artist, row.showArt ? row.track.album : ""].filter(function (x) { return !!x }).join(" — ")
                 visible: text !== ""
                 color: row.dimC; elide: Text.ElideRight
                 font.family: Theme.font; font.pointSize: Theme.fontSize - 1

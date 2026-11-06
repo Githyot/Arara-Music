@@ -243,11 +243,24 @@ Item {
         text: "Adicionar letra"; color: Theme.hover
         onClicked: view.addLyrics()
     }
-    Text {
+    Column {
         id: noneText
         anchors.centerIn: parent
         visible: view.lyrics.kind === "none"
-        text: view.loading ? "Buscando letra…" : "Sem letra para esta música"
-        color: view.dim; font.family: Theme.font; font.pointSize: view.compact ? Theme.fontSize - 1 : 14
+        spacing: 8
+        Icon {
+            anchors.horizontalCenter: parent.horizontalCenter
+            name: "lyrics"; size: view.compact ? 28 : 48; color: view.dim
+            opacity: view.loading ? 0.5 : 1
+            SequentialAnimation on opacity {
+                running: view.loading; loops: Animation.Infinite
+                NumberAnimation { to: 0.25; duration: 600 } NumberAnimation { to: 1; duration: 600 }
+            }
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: view.loading ? "Buscando letra…" : "Sem letra para esta música"
+            color: view.dim; font.family: Theme.font; font.pointSize: view.compact ? Theme.fontSize - 1 : 14
+        }
     }
 }

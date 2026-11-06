@@ -20,6 +20,17 @@ Item {
         for (var i = 0; i < sections.length; i += step) out.push(sections[i])
         return out
     }
+    // Section the top of the view is in, so its letter stays lit while reading.
+    readonly property int currentShown: {
+        if (!view || shown.length === 0) return -1
+        var y = view.contentY + 8   // re-evaluate on scroll
+        var row = view.indexAt(view.width / 2, y)
+        if (row < 0) row = view.indexAt(view.width / 2, y + 40)
+        if (row < 0) return view.contentY <= view.originY + 1 ? 0 : -1
+        var best = 0
+        for (var i = 0; i < shown.length; i++) if (shown[i].row <= row) best = i
+        return best
+    }
     property string bubble: ""
     property real bubbleY: 0
 
@@ -49,13 +60,28 @@ Item {
         width: 22
         Repeater {
             model: fs.shown
-            Text {
+            Item {
+                id: letter
                 required property var modelData
+                required property int index
+                readonly property bool lit: fs.bubble !== "" ? fs.bubble === modelData.l : index === fs.currentShown
                 width: 22; height: Math.min(18, (fs.height - 16) / Math.max(1, fs.shown.length))
-                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                text: modelData.l.length > 2 ? "’" + modelData.l.slice(-2) : modelData.l
-                color: fs.bubble === modelData.l ? Theme.accentFg : Theme.dimFg
-                font.family: Theme.font; font.pointSize: Theme.fontSize - 3; font.weight: Font.DemiBold
+                // pill behind the current letter
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 20; height: Math.min(18, parent.height); radius: height / 2
+                    color: Theme.accent
+                    opacity: letter.lit ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: Theme.ms(150) } }
+                }
+                Text {
+                    anchors.fill: parent
+                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                    text: letter.modelData.l.length > 2 ? "’" + letter.modelData.l.slice(-2) : letter.modelData.l
+                    color: letter.lit ? Theme.accentInk : Theme.fg
+                    opacity: letter.lit ? 1 : 0.72
+                    font.family: Theme.font; font.pointSize: Theme.fontSize - 3; font.weight: letter.lit ? Font.Bold : Font.DemiBold
+                }
             }
         }
     }

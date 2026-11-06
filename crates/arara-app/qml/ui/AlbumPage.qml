@@ -87,6 +87,7 @@ Flickable {
                         width: col.width
                         track: modelData
                         number: index
+                        hideArtist: page.album && page.album.artist ? page.album.artist : ""
                         playing: modelData.id === page.playingId
                         onActivated: page.play(page.tracks, index)
                         onMenuRequested: (t, x, y) => page.menuRequested(t, x, y)

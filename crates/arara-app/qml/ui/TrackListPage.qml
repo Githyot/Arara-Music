@@ -9,6 +9,7 @@ Item {
     property string subtitle: ""
     property string emptyText: "Nada aqui ainda"
     property string emptyHint: ""
+    property string emptyIcon: "songs"
     property var tracks: []
     property int playingId: -1
     property bool removable: false
@@ -42,7 +43,7 @@ Item {
                 width: lv.width - 2 * page.side
                 spacing: 6
                 Text { text: page.title; color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.titleSize; font.weight: Theme.titleWeight; width: parent.width; elide: Text.ElideRight }
-                Text { visible: text !== ""; text: page.subtitle; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
+                Text { visible: text !== "" && page.tracks.length > 0; text: page.subtitle; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
                 Item { width: 1; height: 6 }
                 Row {
                     spacing: 8
@@ -97,6 +98,8 @@ Item {
         anchors.centerIn: parent
         visible: page.tracks.length === 0
         spacing: 8
+        Icon { anchors.horizontalCenter: parent.horizontalCenter; name: page.emptyIcon; size: 96; color: Theme.dimFg; opacity: 0.6 }
+        Item { width: 1; height: 8 }
         Text { anchors.horizontalCenter: parent.horizontalCenter; text: page.emptyText; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.headingSize + 1; font.weight: Theme.headingWeight }
         Text { anchors.horizontalCenter: parent.horizontalCenter; visible: text !== ""; text: page.emptyHint; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
     }

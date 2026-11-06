@@ -1,9 +1,10 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls.Basic
 import AraraStyle
 
 // Right-hand player panel: big cover, title/artist/album, seek with
-// elapsed/remaining, transport, wide volume, and tabs Player / Fila / Letra.
+// elapsed/remaining, transport, wide volume; the queue opens from its button.
 Rectangle {
     id: panel
     property var track: null
@@ -35,6 +36,8 @@ Rectangle {
     signal close()
     signal starToggled(var track, bool starred)
     signal menuRequested(var track, real x, real y)
+    signal goArtist(var track)
+    signal goAlbum(var track)
 
     property var colors: []
     color: "#26272b"
@@ -90,7 +93,7 @@ Rectangle {
         visible: opacity > 0
         opacity: panel.tab === "player" ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: Theme.ms(200) } }
-        anchors { left: parent.left; right: parent.right; top: closeBtn.bottom; bottom: tabs.top; leftMargin: 20; rightMargin: 20 }
+        anchors { left: parent.left; right: parent.right; top: closeBtn.bottom; bottom: parent.bottom; leftMargin: 20; rightMargin: 20 }
         contentHeight: Math.max(height, col.height + 24)
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -138,17 +141,34 @@ Rectangle {
                     text: panel.track ? panel.track.title : "Nada tocando"
                     color: "white"; font.family: Theme.displayFont; font.pointSize: Theme.headingSize + 1; font.weight: Theme.headingWeight
                 }
+                // Artist and album: click either to go to the artist's or the album's page.
                 Text {
+                    id: artistText
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                     visible: text !== ""
                     text: panel.track ? panel.track.artist || "" : ""
-                    color: "white"; opacity: 0.85; font.family: Theme.font; font.pointSize: Theme.fontSize + 1
+                    color: "white"; opacity: artistMa.containsMouse ? 1 : 0.85; font.family: Theme.font; font.pointSize: Theme.fontSize + 1
+                    font.underline: artistMa.containsMouse
+                    MouseArea {
+                        id: artistMa
+                        anchors.centerIn: parent; width: Math.min(parent.width, parent.contentWidth + 8); height: parent.height
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: goMenu.openBelow(artistText)
+                    }
                 }
                 Text {
+                    id: albumText
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                     visible: text !== ""
                     text: panel.track ? panel.track.album || "" : ""
-                    color: Qt.rgba(1, 1, 1, 0.6); font.family: Theme.font; font.pointSize: Theme.fontSize
+                    color: Qt.rgba(1, 1, 1, albumMa.containsMouse ? 0.9 : 0.6); font.family: Theme.font; font.pointSize: Theme.fontSize
+                    font.underline: albumMa.containsMouse
+                    MouseArea {
+                        id: albumMa
+                        anchors.centerIn: parent; width: Math.min(parent.width, parent.contentWidth + 8); height: parent.height
+                        hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: goMenu.openBelow(albumText)
+                    }
                 }
                 // Quality badge (Hi-Res / Sem perdas) + format detail
                 Row {
@@ -186,7 +206,8 @@ Rectangle {
                     icon: panel.track && panel.track.starred ? "star" : "unstar"; circular: true; iconColor: "white"
                     onClicked: { var s = !panel.track.starred; panel.track.starred = s; panel.starToggled(panel.track, s); panel.trackChanged() }
                 }
-                FlatButton { icon: "lyrics"; circular: true; iconColor: "white"; onClicked: panel.openLyrics() }
+                FlatButton { icon: "lyrics"; circular: true; iconColor: "white"; tip: "Letra"; onClicked: panel.openLyrics() }
+                FlatButton { icon: "queue"; circular: true; iconColor: "white"; tip: "Fila"; onClicked: panel.tab = "queue" }
                 FlatButton {
                     id: more; icon: "more"; circular: true; iconColor: "white"
                     onClicked: { var p = more.mapToItem(null, 0, more.height); panel.menuRequested(panel.track, p.x, p.y) }
@@ -237,11 +258,33 @@ Rectangle {
         visible: opacity > 0
         opacity: panel.tab === "queue" ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: Theme.ms(200) } }
-        anchors { left: parent.left; right: parent.right; top: closeBtn.bottom; bottom: tabs.top }
+        anchors { left: parent.left; right: parent.right; top: closeBtn.bottom; bottom: parent.bottom }
+        // Header: back to the player, title and size of the queue.
+        Item {
+            id: queueHead
+            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 12; rightMargin: 16 }
+            height: 40
+            FlatButton {
+                id: queueBack
+                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                icon: "back"; circular: true; iconColor: "white"; tip: "Voltar ao player"
+                onClicked: panel.tab = "player"
+            }
+            Text {
+                anchors { left: queueBack.right; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                text: "Fila"; color: "white"
+                font.family: Theme.displayFont; font.pointSize: Theme.headingSize; font.weight: Theme.headingWeight
+            }
+            Text {
+                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                text: panel.queue.length + (panel.queue.length === 1 ? " música" : " músicas")
+                color: Qt.rgba(1, 1, 1, 0.65); font.family: Theme.font; font.pointSize: Theme.fontSize - 1
+            }
+        }
         // AdwSwitchRow-like autoplay toggle
         Item {
             id: autoRow
-            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 16 }
+            anchors { left: parent.left; right: parent.right; top: queueHead.bottom; leftMargin: 20; rightMargin: 16 }
             height: 56
             Column {
                 anchors { left: parent.left; right: sw.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
@@ -267,49 +310,35 @@ Rectangle {
         }
     }
 
-    // ---------- tabs (AdwViewSwitcherBar-like) ----------
-    Row {
-        id: tabs
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 8 }
-        height: 52
-        Repeater {
-            model: [{ k: "player", i: "songs", t: "Player" }, { k: "queue", i: "queue", t: "Fila" }, { k: "lyrics", i: "lyrics", t: "Letra" }]
-            Item {
-                id: tab
-                required property var modelData
-                readonly property bool on: modelData.k === panel.tab
-                width: tabs.width / 3; height: tabs.height
-                // GNOME/macOS/Fluent: highlighted tile. Material: pill behind the icon only.
+    // Small popover: go to the artist or to the album of the current track.
+    Popup {
+        id: goMenu
+        parent: panel.Window.contentItem
+        width: 220; padding: 6
+        modal: false; focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        function openBelow(item) {
+            var p = item.mapToItem(null, item.width / 2, item.height)
+            x = Math.max(8, Math.min(p.x - width / 2, (parent ? parent.width : 9999) - width - 8)); y = p.y + 4
+            open()
+        }
+        background: Rectangle {
+            radius: Theme.popupRadius; color: Theme.popupBg; border.color: Theme.border
+            Rectangle { z: -1; anchors.fill: parent; anchors.margins: -2; radius: parent.radius + 2; color: "#000000"; opacity: 0.08 }
+        }
+        contentItem: Column {
+            Repeater {
+                model: [{ k: "artist", i: "artist", t: "Ver página do artista" }, { k: "album", i: "albums", t: "Ver página do álbum" }]
                 Rectangle {
-                    visible: !Theme.material
-                    anchors.fill: parent; radius: Theme.radius
-                    color: tab.on ? Qt.rgba(1, 1, 1, 0.16) : tm.containsMouse ? Qt.rgba(1, 1, 1, 0.08) : "transparent"
-                    Behavior on color { ColorAnimation { duration: Theme.ms(150) } }
-                    Rectangle {
-                        visible: Theme.fluent && tab.on
-                        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 3 }
-                        width: 16; height: 3; radius: 1.5; color: Theme.dark ? Theme.accent : "white"
+                    required property var modelData
+                    width: goMenu.width - 12; height: 36; radius: Theme.material ? 0 : Theme.radius
+                    color: gm.containsMouse ? Theme.hover : "transparent"
+                    Icon { id: gi; anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter } name: modelData.i; size: 16 }
+                    Text { anchors { left: gi.right; leftMargin: 10; verticalCenter: parent.verticalCenter } text: modelData.t; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize }
+                    MouseArea {
+                        id: gm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: { goMenu.close(); if (modelData.k === "artist") panel.goArtist(panel.track); else panel.goAlbum(panel.track) }
                     }
-                }
-                Column {
-                    anchors.centerIn: parent; spacing: Theme.material ? 4 : 2
-                    Item {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Theme.material ? 56 : 16; height: Theme.material ? 28 : 16
-                        Rectangle {
-                            visible: Theme.material
-                            anchors.centerIn: parent
-                            width: tab.on ? 56 : (tm.containsMouse ? 56 : 32); height: 28; radius: 14
-                            color: tab.on ? Qt.rgba(1, 1, 1, 0.22) : tm.containsMouse ? Qt.rgba(1, 1, 1, 0.08) : "transparent"
-                            Behavior on width { NumberAnimation { duration: Theme.ms(180); easing.type: Easing.OutCubic } }
-                        }
-                        Icon { anchors.centerIn: parent; name: tab.modelData.i; size: 16; color: "white"; opacity: tab.on ? 1 : 0.7 }
-                    }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: tab.modelData.t; color: "white"; opacity: tab.on ? 1 : 0.7; font.family: Theme.font; font.pointSize: Theme.fontSize - 2; font.weight: tab.on || !Theme.material ? Font.DemiBold : Font.Normal }
-                }
-                MouseArea {
-                    id: tm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                    onClicked: tab.modelData.k === "lyrics" ? panel.openLyrics() : panel.tab = tab.modelData.k
                 }
             }
         }
