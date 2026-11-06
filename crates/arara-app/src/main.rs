@@ -1,4 +1,11 @@
+// No console window behind the app on Windows.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod bridge;
+#[cfg(not(windows))]
+mod desktop;
+#[cfg(windows)]
+#[path = "desktop_win.rs"]
 mod desktop;
 mod models;
 

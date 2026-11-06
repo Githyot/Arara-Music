@@ -145,7 +145,16 @@ fn enc(s: &str) -> String {
 /// `file://` URL for a local path, escaping only what would break URL parsing.
 pub fn file_url(path: &str) -> String {
     let mut out = String::from("file://");
+    // Windows: C:\Music\a.mp3 -> file:///C:/Music/a.mp3
+    let win = cfg!(windows) || path.as_bytes().get(1) == Some(&b':');
+    if win && !path.starts_with('/') {
+        out.push('/');
+    }
     for c in path.chars() {
+        if win && c == '\\' {
+            out.push('/');
+            continue;
+        }
         match c {
             '%' => out.push_str("%25"),
             '#' => out.push_str("%23"),
@@ -154,6 +163,19 @@ pub fn file_url(path: &str) -> String {
         }
     }
     out
+}
+
+/// Local path from a `file://` URL (or a plain path), undoing [`file_url`].
+pub fn url_to_path(u: &str) -> String {
+    let p = u.strip_prefix("file://").unwrap_or(u);
+    let b = p.as_bytes();
+    // file:///C:/x -> C:/x
+    let p = if b.len() > 2 && b[0] == b'/' && b[2] == b':' && b[1].is_ascii_alphabetic() { &p[1..] } else { p };
+    if cfg!(windows) {
+        p.replace('/', "\\")
+    } else {
+        p.to_string()
+    }
 }
 
 fn random_hex(n: usize) -> String {

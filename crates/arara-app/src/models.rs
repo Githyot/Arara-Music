@@ -113,7 +113,7 @@ impl Default for TrackModelRust {
 impl TrackModelRust {
     fn cover(&self, hash: &Option<String>, size: u32) -> String {
         hash.as_ref()
-            .map(|h| format!("file://{}/{h}-{size}.jpg", self.covers_dir.display()))
+            .map(|h| remote::file_url(&self.covers_dir.join(format!("{h}-{size}.jpg")).to_string_lossy()))
             .unwrap_or_default()
     }
 

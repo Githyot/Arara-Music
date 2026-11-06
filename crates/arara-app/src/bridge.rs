@@ -387,6 +387,9 @@ fn system_prefers_dark() -> bool {
     if let Ok(v) = std::env::var("ARARA_DARK") {
         return v == "1";
     }
+    #[cfg(windows)]
+    return desktop::windows_prefers_dark().unwrap_or(false);
+    #[cfg(not(windows))]
     std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "color-scheme"])
         .output()
@@ -398,6 +401,11 @@ fn default_music_dir() -> String {
     if let Ok(v) = std::env::var("ARARA_LIBRARY") {
         return v;
     }
+    #[cfg(windows)]
+    return directories::UserDirs::new()
+        .and_then(|d| d.audio_dir().map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| format!("{}\\Music", std::env::var("USERPROFILE").unwrap_or_default()));
+    #[cfg(not(windows))]
     std::process::Command::new("xdg-user-dir")
         .arg("MUSIC")
         .output()
@@ -562,7 +570,7 @@ impl qobject::Library {
 
     pub fn add_library_dir(mut self: Pin<&mut Self>, dir: &QString) {
         let d = dir.to_string();
-        let d = d.strip_prefix("file://").unwrap_or(&d).trim_end_matches('/').to_string();
+        let d = remote::url_to_path(&d).trim_end_matches(['/', '\\']).to_string();
         if d.is_empty() || !std::path::Path::new(&d).is_dir() {
             return;
         }
@@ -623,7 +631,7 @@ impl qobject::Library {
         if self.scanning {
             return;
         }
-        let dir = dir.to_string().trim_start_matches("file://").to_string();
+        let dir = remote::url_to_path(&dir.to_string());
         if let Some(d) = &self.db {
             let _ = d.set_kv("library_dir", &dir);
         }
@@ -676,7 +684,7 @@ impl qobject::Library {
 
     fn cover(&self, hash: &Option<String>, size: u32) -> String {
         match hash {
-            Some(h) => format!("file://{}/{h}-{size}.jpg", self.covers_dir.display()),
+            Some(h) => remote::file_url(&self.covers_dir.join(format!("{h}-{size}.jpg")).to_string_lossy()),
             None => String::new(),
         }
     }
@@ -758,19 +766,19 @@ impl qobject::Library {
 
     pub fn cover_blur(&self, url: &QString) -> QString {
         let u = url.to_string();
-        let path = u.strip_prefix("file://").unwrap_or(&u);
+        let path = &remote::url_to_path(&u);
         if path.is_empty() {
             return qs("");
         }
         match arara_core::covers::blurred(std::path::Path::new(path)) {
-            Some(p) => qs(&format!("file://{}", p.display())),
+            Some(p) => qs(&remote::file_url(&p.to_string_lossy())),
             None => qs(""),
         }
     }
 
     pub fn cover_colors(&self, url: &QString) -> QString {
         let u = url.to_string();
-        let path = u.strip_prefix("file://").unwrap_or(&u);
+        let path = &remote::url_to_path(&u);
         qs(&serde_json::to_string(&arara_core::covers::palette(std::path::Path::new(path))).unwrap())
     }
 
@@ -1150,7 +1158,7 @@ impl qobject::Library {
 
     pub fn set_library_dir_and_scan(mut self: Pin<&mut Self>, dir: &QString) {
         let d = dir.to_string();
-        let d = d.strip_prefix("file://").unwrap_or(&d).to_string();
+        let d = remote::url_to_path(&d);
         if d.is_empty() || !std::path::Path::new(&d).is_dir() {
             self.as_mut().set_status(qs("Pasta inválida"));
             return;
@@ -1166,7 +1174,7 @@ impl qobject::Library {
         let qt = self.qt_thread();
         let db_path = self.db_path.clone();
         let p = path.to_string();
-        let p = PathBuf::from(p.strip_prefix("file://").unwrap_or(&p));
+        let p = PathBuf::from(remote::url_to_path(&p));
         std::thread::spawn(move || {
             let out = (|| -> Result<import::Report, String> {
                 let pls = import::read_path(&p)?;

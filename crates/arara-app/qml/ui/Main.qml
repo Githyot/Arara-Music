@@ -937,7 +937,7 @@ Window {
         id: folderDialog
         property bool adding: false
         title: adding ? "Adicionar pasta de músicas" : "Escolha a pasta de músicas"
-        currentFolder: "file://" + library.libraryDir
+        currentFolder: Qt.platform.os === "windows" ? "file:///" + library.libraryDir.replace(/\\/g, "/") : "file://" + library.libraryDir
         options: FolderDialog.ShowDirsOnly
         onAccepted: {
             var p = decodeURIComponent(selectedFolder.toString().replace(/^file:\/\//, ""))
