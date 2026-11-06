@@ -57,6 +57,12 @@ struct Parsed {
     duration_ms: u64,
     track_gain: Option<f64>,
     album_gain: Option<f64>,
+    genre: Option<String>,
+    composer: Option<String>,
+    format: Option<String>,
+    sample_rate: Option<u32>,
+    bit_depth: Option<u8>,
+    bitrate: Option<u32>,
     /// Hash of the album thumbnail written by the worker (first track of each album only).
     cover_hash: Option<String>,
 }
@@ -116,7 +122,27 @@ fn parse_file(
     covers: &CoverCache,
 ) -> Option<Parsed> {
     let tagged = lofty::read_from_path(path).ok()?;
-    let duration_ms = tagged.properties().duration().as_millis() as u64;
+    let props = tagged.properties();
+    let duration_ms = props.duration().as_millis() as u64;
+    let format = Some(match tagged.file_type() {
+        lofty::file::FileType::Flac => "FLAC",
+        lofty::file::FileType::Mpeg => "MP3",
+        lofty::file::FileType::Opus => "Opus",
+        lofty::file::FileType::Vorbis => "Vorbis",
+        lofty::file::FileType::Mp4 => {
+            // ALAC and AAC share the container; ALAC reports a bit depth.
+            if props.bit_depth().is_some() { "ALAC" } else { "AAC" }
+        }
+        lofty::file::FileType::Wav => "WAV",
+        lofty::file::FileType::Aiff => "AIFF",
+        lofty::file::FileType::WavPack => "WavPack",
+        lofty::file::FileType::Ape => "APE",
+        lofty::file::FileType::Aac => "AAC",
+        _ => "",
+    })
+    .filter(|f| !f.is_empty())
+    .map(str::to_owned);
+    let (sample_rate, bit_depth, bitrate) = (props.sample_rate(), props.bit_depth(), props.audio_bitrate());
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
 
     let stem = path
@@ -124,7 +150,7 @@ fn parse_file(
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    let (title, artist, album_artist, album, track_no, disc_no, year, tg, ag, picture) =
+    let (title, artist, album_artist, album, track_no, disc_no, year, tg, ag, picture, genre, composer) =
         match tag {
             Some(t) => {
                 let artist = t.artist().map(|s| s.into_owned()).unwrap_or_default();
@@ -136,7 +162,10 @@ fn parse_file(
                 // Only the first track *that has art* claims its album; the rest skip
                 // it, so at most one picture per album is ever decoded. Tracks without
                 // embedded art fall back to folder art, checked once per directory.
-                let picture = if !album_s.is_empty() && !claims.has(&album_s, &album_artist) {
+                let picture = if album_s.is_empty() {
+                    // No album to share art with: the track keeps its own picture.
+                    t.pictures().first().and_then(|pic| covers.store(pic.data()).ok())
+                } else if !claims.has(&album_s, &album_artist) {
                     let bytes = match t.pictures().first() {
                         Some(pic) if claims.claim(&album_s, &album_artist) => Some(pic.data().to_vec()),
                         Some(_) => None,
@@ -162,9 +191,11 @@ fn parse_file(
                     parse_gain(t.get_string(&ItemKey::ReplayGainTrackGain)),
                     parse_gain(t.get_string(&ItemKey::ReplayGainAlbumGain)),
                     picture,
+                    t.genre().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()),
+                    t.get_string(&ItemKey::Composer).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()),
                 )
             }
-            None => (stem, String::new(), String::new(), None, None, None, None, None, None, None),
+            None => (stem, String::new(), String::new(), None, None, None, None, None, None, None, None, None),
         };
 
     Some(Parsed {
@@ -182,6 +213,12 @@ fn parse_file(
         track_gain: tg,
         album_gain: ag,
         cover_hash: picture,
+        genre,
+        composer,
+        format,
+        sample_rate,
+        bit_depth,
+        bitrate,
     })
 }
 
@@ -263,7 +300,10 @@ pub fn scan(
             });
         });
 
-        let txn = db.conn.transaction()?;
+        // Commit in small batches so the write lock is released often: the UI
+        // (saving the queue, play counts, stars) never waits more than a moment.
+        let mut txn = db.conn.unchecked_transaction()?;
+        let mut batch_start = Instant::now();
         let mut done = 0usize;
         for msg in rx {
             done += 1;
@@ -290,6 +330,12 @@ pub fn scan(
                     track_gain: p.track_gain,
                     album_gain: p.album_gain,
                     cover_hash: p.cover_hash.as_deref(),
+                    genre: p.genre.as_deref(),
+                    composer: p.composer.as_deref(),
+                    format: p.format.as_deref(),
+                    sample_rate: p.sample_rate,
+                    bit_depth: p.bit_depth,
+                    bitrate: p.bitrate,
                 },
                 now,
             )?;
@@ -299,6 +345,11 @@ pub fn scan(
 
             if done % 250 == 0 {
                 on_event(ScanEvent::Parsed { done, total });
+            }
+            if done % 200 == 0 || batch_start.elapsed().as_millis() > 400 {
+                txn.commit()?;
+                txn = db.conn.unchecked_transaction()?;
+                batch_start = Instant::now();
             }
         }
 

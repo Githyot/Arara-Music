@@ -20,14 +20,16 @@ Rectangle {
     signal prev()
     signal seek(real ms)
     signal expand()
+    signal lyrics()
 
-    height: 72
+    height: 78
     color: Theme.headerBg
     Rectangle { anchors { left: parent.left; right: parent.right; top: parent.top } height: 1; color: Theme.border; opacity: 0.6 }
 
+    // Seek bar along the top edge, fully inside the bar (the knob no longer sticks out).
     Slider {
         id: seekBar
-        anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: -7 }
+        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 6; rightMargin: 6 }
         from: 0; to: Math.max(1, bar.duration)
         value: pressed ? value : bar.position
         onMoved: bar.seek(value)
@@ -44,13 +46,10 @@ Rectangle {
     }
 
     Row {
-        anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+        anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter; verticalCenterOffset: 4 }
         spacing: 12
         width: parent.width / 2 - 100
-        Rectangle {
-            width: 48; height: 48; radius: Theme.radius; color: Theme.cardBg; clip: true
-            Image { anchors.fill: parent; source: bar.track ? bar.track.cover : ""; sourceSize: Qt.size(48, 48); asynchronous: true; cache: false }
-        }
+        CoverArt { width: 48; height: 48; decode: 96; source: bar.track ? bar.track.cover : "" }
         Column {
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width - 60
@@ -63,6 +62,7 @@ Rectangle {
 
     Row {
         anchors.centerIn: parent
+        anchors.verticalCenterOffset: 4
         spacing: 8
         FlatButton { icon: "shuffle"; circular: true; checked: bar.shuffle; visible: bar.width > 560; onClicked: bar.toggleShuffle() }
         FlatButton { icon: "prev"; circular: true; onClicked: bar.prev() }
@@ -72,7 +72,7 @@ Rectangle {
     }
 
     Row {
-        anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+        anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter; verticalCenterOffset: 4 }
         spacing: 6
         Text {
             anchors.verticalCenter: parent.verticalCenter
@@ -90,7 +90,7 @@ Rectangle {
             id: vol
             visible: bar.width > 860
             anchors.verticalCenter: parent.verticalCenter
-            width: 90; height: 20
+            width: 140; height: 20
             from: 0; to: 1; value: bar.volume
             onMoved: bar.volumeMoved(value)
             background: Rectangle {
@@ -102,6 +102,6 @@ Rectangle {
                 width: 14; height: 14; radius: 7; color: "white"; border.color: Theme.border
             }
         }
-        FlatButton { icon: "lyrics"; onClicked: bar.expand() }
+        FlatButton { icon: "lyrics"; onClicked: bar.lyrics() }
     }
 }

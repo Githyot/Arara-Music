@@ -24,6 +24,7 @@ pub mod qobject {
         #[qproperty(bool, dark)]
         #[qproperty(QString, accent)]
         #[qproperty(bool, syncing)]
+        #[qproperty(QString, lyrics_progress, cxx_name = "lyricsProgress")]
         type Library = super::LibraryRust;
 
         /// Opens the cached index (instant), starts a background rescan,
@@ -54,6 +55,26 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "searchJson"]
         fn search_json(self: &Library, query: &QString) -> QString;
+
+        /// Categories: kind is "genre", "year", "composer" or "folder".
+        #[qinvokable]
+        #[cxx_name = "groupsJson"]
+        fn groups_json(self: &Library, kind: &QString) -> QString;
+
+        /// Tracks to continue after the queue ends (same artist/genre first).
+        #[qinvokable]
+        #[cxx_name = "autoplayJson"]
+        fn autoplay_json(self: &Library, seed: i64, exclude_json: &QString, count: i32) -> QString;
+
+        /// JSON array of colours sampled from a cover thumbnail URL.
+        /// file:// URL of a small blurred copy of a cover, for backgrounds ("" if none).
+        #[qinvokable]
+        #[cxx_name = "coverBlur"]
+        fn cover_blur(self: &Library, url: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "coverColors"]
+        fn cover_colors(self: &Library, url: &QString) -> QString;
 
         #[qinvokable]
         #[cxx_name = "starredJson"]
@@ -87,6 +108,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "createPlaylist"]
         fn create_playlist(self: Pin<&mut Library>, name: &QString) -> i64;
+
+        /// Create (id < 0) or edit a smart playlist; returns its id.
+        #[qinvokable]
+        #[cxx_name = "saveSmartPlaylist"]
+        fn save_smart_playlist(self: Pin<&mut Library>, id: i64, name: &QString, query: &QString, sort: &QString, limit: i64) -> i64;
 
         #[qinvokable]
         #[cxx_name = "renamePlaylist"]
@@ -124,6 +150,11 @@ pub mod qobject {
         #[cxx_name = "requestLyrics"]
         fn request_lyrics(self: Pin<&mut Library>, track_id: i64);
 
+        /// Forget the stored lyrics (wrong version, unsynced) and look them up again.
+        #[qinvokable]
+        #[cxx_name = "refetchLyrics"]
+        fn refetch_lyrics(self: Pin<&mut Library>, track_id: i64);
+
         /// Mirror player state to MPRIS. `track_json` is a track object or "null".
         #[qinvokable]
         #[cxx_name = "mprisUpdate"]
@@ -160,6 +191,29 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "changeLibraryDir"]
         fn set_library_dir_and_scan(self: Pin<&mut Library>, dir: &QString);
+
+        /// All music folders (JSON array of paths); the first is `libraryDir`.
+        #[qinvokable]
+        #[cxx_name = "libraryDirsJson"]
+        fn library_dirs_json(self: &Library) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "addLibraryDir"]
+        fn add_library_dir(self: Pin<&mut Library>, dir: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "removeLibraryDir"]
+        fn remove_library_dir(self: Pin<&mut Library>, dir: &QString);
+
+        /// Keep the computer awake while music plays (portal Inhibit).
+        #[qinvokable]
+        #[cxx_name = "setPlaying"]
+        fn set_playing(self: Pin<&mut Library>, playing: bool);
+
+        /// Publish the current lyric line on D-Bus for desktop widgets.
+        #[qinvokable]
+        #[cxx_name = "publishLyricLine"]
+        fn publish_lyric_line(self: &Library, line: &QString, next: &QString, title: &QString, artist: &QString);
 
         /// Import playlists/likes from an export file or folder (Apple Music, YouTube Music, CSV, M3U…).
         /// Runs in the background and answers with importFinished(report JSON).
@@ -228,6 +282,30 @@ pub mod qobject {
         #[cxx_name = "lyricsReady"]
         fn lyrics_ready(self: Pin<&mut Library>, track_id: i64, json: QString);
 
+        /// Search Jamendo + Internet Archive (open licences only); answers with `freeResults`.
+        #[qinvokable]
+        #[cxx_name = "searchFree"]
+        fn search_free(self: Pin<&mut Library>, query: &QString);
+
+        /// `json`: array of tracks; `errors`: array of strings (a source that failed).
+        #[qsignal]
+        #[cxx_name = "freeResults"]
+        fn free_results(self: Pin<&mut Library>, query: QString, json: QString, errors: QString);
+
+        /// Download a free track (FreeTrack JSON) into the library, with its .lrc.
+        #[qinvokable]
+        #[cxx_name = "downloadFree"]
+        fn download_free(self: Pin<&mut Library>, track_json: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "cancelDownload"]
+        fn cancel_download(self: &Library, id: &QString);
+
+        /// kind: started | progress | done | here | failed | cancelled. `pct` -1 = unknown size.
+        #[qsignal]
+        #[cxx_name = "downloadEvent"]
+        fn download_event(self: Pin<&mut Library>, id: QString, kind: QString, pct: i32, message: QString);
+
         /// play, pause, playpause, stop, next, previous, seek (arg = µs offset),
         /// setposition (arg = µs), raise, quit
         #[qsignal]
@@ -239,7 +317,7 @@ pub mod qobject {
 }
 
 use crate::desktop::{self, Command, Mpris, TrackMeta};
-use arara_core::{covers::CoverCache, db::Db, import, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
+use arara_core::{covers::CoverCache, db::Db, downloads, freemusic, import, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
 use core::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
@@ -255,6 +333,8 @@ pub struct LibraryRust {
     dark: bool,
     accent: QString,
     syncing: bool,
+    lyrics_progress: QString,
+    prefetching: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: remote::Resolver,
     sync_queue: Vec<i64>,
     db_path: PathBuf,
@@ -263,6 +343,8 @@ pub struct LibraryRust {
     rescan_pending: bool,
     watcher: Option<LibraryWatcher>,
     mpris: Option<Mpris>,
+    inhibit: Option<desktop::Inhibitor>,
+    downloads: Option<downloads::DownloadManager>,
 }
 
 impl Default for LibraryRust {
@@ -283,6 +365,8 @@ impl Default for LibraryRust {
             dark: system_prefers_dark(),
             accent: QString::from("#3584e4"),
             syncing: false,
+            lyrics_progress: QString::default(),
+            prefetching: Default::default(),
             resolver: remote::Resolver::default(),
             sync_queue: Vec::new(),
             db_path: p.db,
@@ -291,6 +375,8 @@ impl Default for LibraryRust {
             rescan_pending: false,
             watcher: None,
             mpris: None,
+            inhibit: None,
+            downloads: None,
         }
     }
 }
@@ -326,7 +412,7 @@ fn lyrics_to_json(res: lyrics::Lyrics) -> String {
         lyrics::Lyrics::Synced(lines) => json!({
             "kind": "synced",
             "lines": lines.iter().map(|l| json!({
-                "t": l.start_ms, "e": l.end_ms, "text": l.text, "ws": l.word_synced,
+                "t": l.start_ms, "e": l.end_ms, "text": l.text, "ws": l.word_synced, "v": l.voice,
                 "w": l.words.iter().map(|w| json!([w.start_ms, w.end_ms, w.text])).collect::<Vec<_>>()
             })).collect::<Vec<_>>()
         }),
@@ -372,9 +458,15 @@ impl qobject::Library {
         self.as_mut().sync_servers(-1);
     }
 
-    fn start_watching(mut self: Pin<&mut Self>, dir: &str) {
+    fn start_watching(mut self: Pin<&mut Self>, _dir: &str) {
+        let dirs = self.library_dirs();
+        self.as_mut().watch_dirs(&dirs);
+    }
+
+    fn watch_dirs(mut self: Pin<&mut Self>, dirs: &[String]) {
         let qt = self.qt_thread();
-        let w = LibraryWatcher::new(&[PathBuf::from(dir)], std::time::Duration::from_secs(2), move || {
+        let roots: Vec<PathBuf> = dirs.iter().map(PathBuf::from).collect();
+        let w = LibraryWatcher::new(&roots, std::time::Duration::from_secs(2), move || {
             let _ = qt.queue(|o| o.rescan());
         });
         match w {
@@ -437,6 +529,96 @@ impl qobject::Library {
         }
     }
 
+    /// Music folders: the primary one plus any added with "Pastas de música".
+    fn library_dirs(&self) -> Vec<String> {
+        let primary = self.library_dir.to_string();
+        let extra: Vec<String> = self
+            .db
+            .as_ref()
+            .and_then(|d| d.get_kv("library_dirs_extra").ok().flatten())
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+        let mut out = vec![];
+        if !primary.is_empty() {
+            out.push(primary);
+        }
+        for e in extra {
+            if !out.contains(&e) {
+                out.push(e);
+            }
+        }
+        out
+    }
+
+    fn set_extra_dirs(&self, dirs: &[String]) {
+        if let Some(d) = &self.db {
+            let _ = d.set_kv("library_dirs_extra", &serde_json::to_string(dirs).unwrap());
+        }
+    }
+
+    pub fn library_dirs_json(&self) -> QString {
+        qs(&serde_json::to_string(&self.library_dirs()).unwrap())
+    }
+
+    pub fn add_library_dir(mut self: Pin<&mut Self>, dir: &QString) {
+        let d = dir.to_string();
+        let d = d.strip_prefix("file://").unwrap_or(&d).trim_end_matches('/').to_string();
+        if d.is_empty() || !std::path::Path::new(&d).is_dir() {
+            return;
+        }
+        let mut dirs = self.library_dirs();
+        if dirs.contains(&d) {
+            return;
+        }
+        dirs.push(d);
+        self.set_extra_dirs(&dirs[1..]);
+        let primary = self.library_dir.clone();
+        self.as_mut().rust_mut().rescan_pending = self.scanning;
+        if !self.scanning {
+            self.as_mut().start_scan(&primary);
+        }
+        let all = self.library_dirs();
+        self.as_mut().watch_dirs(&all);
+    }
+
+    pub fn remove_library_dir(mut self: Pin<&mut Self>, dir: &QString) {
+        let d = dir.to_string();
+        let mut dirs = self.library_dirs();
+        dirs.retain(|x| x != &d);
+        if dirs.is_empty() {
+            return;
+        }
+        if let Some(db) = &self.db {
+            let _ = db.set_kv("library_dir", &dirs[0]);
+        }
+        self.as_mut().set_library_dir(qs(&dirs[0]));
+        self.set_extra_dirs(&dirs[1..]);
+        if self.scanning {
+            self.as_mut().rust_mut().rescan_pending = true;
+        } else {
+            let primary = qs(&dirs[0]);
+            self.as_mut().start_scan(&primary);
+        }
+        self.as_mut().watch_dirs(&dirs);
+    }
+
+    pub fn set_playing(mut self: Pin<&mut Self>, playing: bool) {
+        if playing {
+            if self.inhibit.is_none() {
+                self.as_mut().rust_mut().inhibit = desktop::Inhibitor::start("Tocando música");
+            }
+        } else {
+            // dropping it releases the inhibition
+            self.as_mut().rust_mut().inhibit = None;
+        }
+    }
+
+    pub fn publish_lyric_line(&self, line: &QString, next: &QString, title: &QString, artist: &QString) {
+        if let Some(m) = &self.mpris {
+            m.lyric_line(&line.to_string(), &next.to_string(), &title.to_string(), &artist.to_string());
+        }
+    }
+
     pub fn start_scan(mut self: Pin<&mut Self>, dir: &QString) {
         if self.scanning {
             return;
@@ -446,6 +628,7 @@ impl qobject::Library {
             let _ = d.set_kv("library_dir", &dir);
         }
         self.as_mut().set_library_dir(qs(&dir));
+        let roots: Vec<PathBuf> = self.library_dirs().into_iter().map(PathBuf::from).collect();
         self.as_mut().set_scanning(true);
         self.as_mut().set_status(qs("Procurando músicas…"));
 
@@ -457,7 +640,7 @@ impl qobject::Library {
                 let mut db = Db::open(&db_path)?;
                 let covers = CoverCache::new(&covers_dir)?;
                 let qt2 = qt.clone();
-                scanner::scan(&mut db, &covers, &[PathBuf::from(&dir)], move |ev| {
+                scanner::scan(&mut db, &covers, &roots, move |ev| {
                     let msg = match ev {
                         scanner::ScanEvent::Discovered(n) => format!("{n} arquivos encontrados"),
                         scanner::ScanEvent::Parsed { done, total } => format!("Indexando {done}/{total}"),
@@ -479,6 +662,7 @@ impl qobject::Library {
                             o.as_mut().library_changed();
                             o.as_mut().playlists_changed();
                         }
+                        o.as_mut().prefetch_lyrics();
                     }
                     Err(e) => o.as_mut().set_status(qs(&format!("Erro: {e}"))),
                 }
@@ -510,7 +694,8 @@ impl qobject::Library {
             "id": t.id, "title": t.title, "artist": t.artist, "album": t.album,
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
             "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
-            "gain": t.track_gain, "albumGain": t.album_gain,
+            "gain": t.track_gain, "albumGain": t.album_gain, "year": t.year, "genre": t.genre,
+            "quality": t.quality().0, "qualityDetail": t.quality().1,
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
@@ -553,6 +738,42 @@ impl qobject::Library {
         self.tracks_to_json(db.search(&query.to_string(), 200))
     }
 
+    pub fn groups_json(&self, kind: &QString) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let v: Vec<_> = db
+            .groups(&kind.to_string())
+            .unwrap_or_default()
+            .iter()
+            .map(|g| json!({ "key": g.key, "name": g.name, "detail": g.detail, "count": g.count,
+                             "cover": self.cover(&g.cover_hash, 256), "l": arara_core::query::letter(&g.name) }))
+            .collect();
+        qs(&serde_json::to_string(&v).unwrap())
+    }
+
+    pub fn autoplay_json(&self, seed: i64, exclude_json: &QString, count: i32) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let exclude: std::collections::HashSet<i64> = serde_json::from_str(&exclude_json.to_string()).unwrap_or_default();
+        self.tracks_to_json(db.autoplay(seed, &exclude, count.max(1) as usize))
+    }
+
+    pub fn cover_blur(&self, url: &QString) -> QString {
+        let u = url.to_string();
+        let path = u.strip_prefix("file://").unwrap_or(&u);
+        if path.is_empty() {
+            return qs("");
+        }
+        match arara_core::covers::blurred(std::path::Path::new(path)) {
+            Some(p) => qs(&format!("file://{}", p.display())),
+            None => qs(""),
+        }
+    }
+
+    pub fn cover_colors(&self, url: &QString) -> QString {
+        let u = url.to_string();
+        let path = u.strip_prefix("file://").unwrap_or(&u);
+        qs(&serde_json::to_string(&arara_core::covers::palette(std::path::Path::new(path))).unwrap())
+    }
+
     pub fn starred_json(&self) -> QString {
         let Some(db) = &self.db else { return qs("[]") };
         self.tracks_to_json(db.starred_tracks())
@@ -587,7 +808,9 @@ impl qobject::Library {
             .playlists()
             .unwrap_or_default()
             .iter()
-            .map(|p| json!({ "id": p.id, "name": p.name, "tracks": p.track_count, "cover": self.cover(&p.cover_hash, 256) }))
+            .map(|p| json!({ "id": p.id, "name": p.name, "tracks": p.track_count, "cover": self.cover(&p.cover_hash, 256),
+                             "smart": p.smart.is_some(), "query": p.smart.as_ref().map(|s| s.0.clone()),
+                             "sort": p.smart.as_ref().map(|s| s.1.clone()), "limit": p.smart.as_ref().map(|s| s.2) }))
             .collect();
         qs(&serde_json::to_string(&v).unwrap())
     }
@@ -599,6 +822,18 @@ impl qobject::Library {
 
     pub fn create_playlist(mut self: Pin<&mut Self>, name: &QString) -> i64 {
         let id = self.db.as_ref().and_then(|db| db.create_playlist(&name.to_string()).ok()).unwrap_or(-1);
+        self.as_mut().playlists_changed();
+        id
+    }
+
+    pub fn save_smart_playlist(mut self: Pin<&mut Self>, id: i64, name: &QString, query: &QString, sort: &QString, limit: i64) -> i64 {
+        let id = self
+            .db
+            .as_ref()
+            .and_then(|db| {
+                db.save_smart_playlist((id >= 0).then_some(id), &name.to_string(), &query.to_string(), &sort.to_string(), limit.max(0)).ok()
+            })
+            .unwrap_or(-1);
         self.as_mut().playlists_changed();
         id
     }
@@ -662,6 +897,13 @@ impl qobject::Library {
             "pos": if current.is_some() && tracks.get(new_index).map(|t| Some(t.id) == current).unwrap_or(false) { v["pos"].as_i64().unwrap_or(0) } else { 0 },
         });
         qs(&out.to_string())
+    }
+
+    pub fn refetch_lyrics(self: Pin<&mut Self>, track_id: i64) {
+        if let Some(db) = self.db.as_ref() {
+            let _ = db.conn.execute("DELETE FROM lyrics WHERE track_id=?1", [track_id]);
+        }
+        self.request_lyrics(track_id);
     }
 
     pub fn request_lyrics(self: Pin<&mut Self>, track_id: i64) {
@@ -887,6 +1129,7 @@ impl qobject::Library {
                 }
                 o.as_mut().servers_changed();
                 o.as_mut().sync_next();
+                o.as_mut().prefetch_lyrics();
             });
         });
     }
@@ -962,6 +1205,143 @@ impl qobject::Library {
                     o.as_mut().picker_unavailable(qs(&purpose), directory)
                 }
             });
+        });
+    }
+}
+
+// ---------- background lyrics download ----------
+impl qobject::Library {
+    pub fn search_free(self: Pin<&mut Self>, query: &QString) {
+        let q = query.to_string();
+        let key = self.db.as_ref().and_then(|d| d.get_kv("pref:jamendo").ok().flatten()).or_else(|| std::env::var("ARARA_JAMENDO_CLIENT_ID").ok());
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let (tracks, errors) = freemusic::FreeMusic::default().search(&q, key.as_deref());
+            let json = serde_json::to_string(&tracks).unwrap_or_else(|_| "[]".into());
+            let errs = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".into());
+            let _ = qt.queue(move |o| o.free_results(qs(&q), qs(&json), qs(&errs)));
+        });
+    }
+
+    pub fn download_free(mut self: Pin<&mut Self>, track_json: &QString) -> bool {
+        let Ok(t) = serde_json::from_str::<serde_json::Value>(&track_json.to_string()) else { return false };
+        let g = |k: &str| t[k].as_str().unwrap_or("").to_string();
+        if g("download_url").is_empty() {
+            return false;
+        }
+        if self.downloads.is_none() {
+            let qt = self.qt_thread();
+            let workers = self.db.as_ref()
+                .and_then(|d| d.get_kv("pref:dlworkers").ok().flatten())
+                .and_then(|v| v.parse::<f64>().ok())
+                .map(|n| n.clamp(1.0, 4.0) as usize)
+                .unwrap_or(2);
+            let mgr = downloads::DownloadManager::new(workers, move |ev| {
+                use downloads::DownloadEvent as E;
+                let (id, kind, pct, msg) = match ev {
+                    E::Started { id } => (id, "started", 0, String::new()),
+                    E::Progress { id, done, total } => (id, "progress", if total > 0 { (done * 100 / total) as i32 } else { -1 }, String::new()),
+                    E::AlreadyHere { id, path } => (id, "here", 100, path.display().to_string()),
+                    E::Finished { id, path, lyrics } => (id, "done", 100, format!("{}{}", path.display(), if lyrics { "|lrc" } else { "" })),
+                    E::Failed { id, error } => (id, "failed", 0, error),
+                    E::Cancelled { id } => (id, "cancelled", 0, String::new()),
+                };
+                let finished = kind == "done";
+                let _ = qt.queue(move |mut o| {
+                    o.as_mut().download_event(qs(&id), qs(kind), pct, qs(&msg));
+                    // the new file is in a watched folder; index it now so it shows up at once
+                    if finished {
+                        o.as_mut().rescan();
+                    }
+                });
+            });
+            self.as_mut().rust_mut().downloads = Some(mgr);
+        }
+        let root = PathBuf::from(self.library_dir.to_string()).join("Música livre");
+        let dest = downloads::library_path(&root, &g("artist"), &g("album"), &g("title"), &g("ext"));
+        let task = downloads::DownloadTask {
+            id: g("id"),
+            url: g("download_url"),
+            dest,
+            artist: g("artist"),
+            title: g("title"),
+            album: g("album"),
+            duration_s: t["duration_ms"].as_u64().unwrap_or(0) / 1000,
+            lyrics: std::env::var("ARARA_OFFLINE").is_err(),
+            comment: format!("{} · {} · {}", g("license"), g("source"), g("page_url")),
+        };
+        self.downloads.as_ref().map(|m| m.enqueue(task)).unwrap_or(false)
+    }
+
+    pub fn cancel_download(&self, id: &QString) {
+        if let Some(m) = &self.downloads {
+            m.cancel(&id.to_string());
+        }
+    }
+
+    /// After indexing: look up lyrics (sidecar, tags, LRCLIB) for every track that has none yet,
+    /// most-played first, two requests at a time. One run at a time; stops when offline.
+    pub fn prefetch_lyrics(mut self: Pin<&mut Self>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        if std::env::var("ARARA_OFFLINE").is_ok() {
+            return;
+        }
+        if self.db.as_ref().and_then(|d| d.get_kv("pref:autolyrics").ok().flatten()).as_deref() == Some("0") {
+            return;
+        }
+        let running = self.prefetching.clone();
+        if running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        self.as_mut().set_lyrics_progress(QString::default());
+        std::thread::spawn(move || {
+            let ids = Db::open(&db_path).and_then(|db| lyrics::pending_tracks(&db)).unwrap_or_default();
+            let total = ids.len();
+            let next = AtomicUsize::new(0);
+            let done = AtomicUsize::new(0);
+            let found = AtomicUsize::new(0);
+            let net_fail = AtomicUsize::new(0);
+            std::thread::scope(|sc| {
+                for _ in 0..2 {
+                    sc.spawn(|| {
+                        let Ok(db) = Db::open(&db_path) else { return };
+                        let client = lyrics::LrclibClient::default();
+                        loop {
+                            let i = next.fetch_add(1, Ordering::SeqCst);
+                            if i >= total || net_fail.load(Ordering::SeqCst) >= 15 {
+                                return;
+                            }
+                            let id = ids[i];
+                            let before = db.cached_lyrics(id).ok().flatten().is_some();
+                            let res = lyrics::resolve(&db, Some(&client), id).unwrap_or(lyrics::Lyrics::None);
+                            let stored = db.cached_lyrics(id).ok().flatten().is_some();
+                            // nothing stored and nothing found: LRCLIB was unreachable
+                            if !stored && !before {
+                                net_fail.fetch_add(1, Ordering::SeqCst);
+                            } else {
+                                net_fail.store(0, Ordering::SeqCst);
+                            }
+                            let n = done.fetch_add(1, Ordering::SeqCst) + 1;
+                            if !matches!(res, lyrics::Lyrics::None) {
+                                found.fetch_add(1, Ordering::SeqCst);
+                                let json = lyrics_to_json(res);
+                                let _ = qt.queue(move |o| o.lyrics_ready(id, qs(&json)));
+                            }
+                            if n % 10 == 0 || n == total {
+                                let msg = format!("Baixando letras {n} de {total}");
+                                let _ = qt.queue(move |o| o.set_lyrics_progress(qs(&msg)));
+                            }
+                        }
+                    });
+                }
+            });
+            running.store(false, Ordering::SeqCst);
+            let offline = net_fail.load(Ordering::SeqCst) >= 15;
+            let f = found.load(Ordering::SeqCst);
+            log::info!("lyrics prefetch: {f} found of {total}{}", if offline { " (stopped: offline)" } else { "" });
+            let _ = qt.queue(|o| o.set_lyrics_progress(QString::default()));
         });
     }
 }

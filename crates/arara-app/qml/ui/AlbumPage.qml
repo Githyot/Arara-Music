@@ -29,22 +29,17 @@ Flickable {
             id: info
             width: wide ? 260 : body.width
             spacing: 10
-            Rectangle {
+            CoverArt {
                 width: Math.min(260, parent.width); height: width
                 x: wide ? 0 : (parent.width - width) / 2
-                radius: Theme.cardRadius; color: Theme.cardBg; clip: true
-                Image {
-                    anchors.fill: parent
-                    source: page.album ? page.album.coverBig : ""
-                    sourceSize: Qt.size(260, 260); asynchronous: true; cache: false
-                    fillMode: Image.PreserveAspectCrop
-                }
+                decode: 260
+                source: page.album ? page.album.coverBig : ""
             }
             Text {
                 width: parent.width; wrapMode: Text.Wrap
                 horizontalAlignment: wide ? Text.AlignLeft : Text.AlignHCenter
                 text: page.album ? page.album.title : ""
-                color: Theme.fg; font.family: Theme.font; font.pointSize: 18; font.weight: Font.Bold
+                color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.titleSize - 2; font.weight: Theme.titleWeight
             }
             Text {
                 width: parent.width; wrapMode: Text.Wrap

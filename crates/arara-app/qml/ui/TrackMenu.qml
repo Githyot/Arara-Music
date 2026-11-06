@@ -28,9 +28,14 @@ Popup {
         open()
     }
 
+    // Straight to the "add to playlist" list (button in the lyrics screen).
+    function openPlaylistsAt(t, x, y, lists) {
+        openAt(t, x, y, lists); showPlaylists = true
+    }
+
     background: Rectangle {
-        radius: Theme.cardRadius
-        color: Theme.dark ? "#36363a" : "#ffffff"
+        radius: Theme.popupRadius
+        color: Theme.popupBg
         border.color: Theme.border
         Rectangle { z: -1; anchors.fill: parent; anchors.margins: -2; radius: parent.radius + 2; color: "#000000"; opacity: 0.08 }
     }
@@ -39,7 +44,7 @@ Popup {
         property string label: ""
         property bool submenu: false
         signal triggered()
-        width: menu.width - 12; height: 34; radius: Theme.radius
+        width: menu.width - 12; height: 34; radius: Theme.material ? 0 : Theme.radius
         color: im.containsMouse ? Theme.hover : "transparent"
         Text { anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter } text: parent.label; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize }
         Text { visible: parent.submenu; anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter } text: "›"; color: Theme.dimFg; font.pointSize: Theme.fontSize + 2 }

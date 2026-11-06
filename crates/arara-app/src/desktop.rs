@@ -2,6 +2,9 @@
 //! * MPRIS 2 (`org.mpris.MediaPlayer2.arara`): media keys, GNOME's top-bar
 //!   media controls, lock screen, headphone buttons.
 //! * XDG Settings portal: system light/dark preference and accent color, live.
+//! * XDG Inhibit portal: keep the computer from suspending while music plays.
+//! * `io.github.Githyot.AraraMusic.Lyrics`: the current lyric line, for
+//!   desktop widgets and floating-lyrics programs.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -43,6 +46,72 @@ pub struct TrackMeta {
 
 struct Root {
     handler: Handler,
+}
+
+pub const LYRICS_PATH: &str = "/io/github/Githyot/AraraMusic";
+
+/// Current lyric line on the session bus. Read the properties, or listen to
+/// `LyricChanged(line, next, title, artist)`.
+#[derive(Default)]
+struct LyricsIface {
+    line: String,
+    next: String,
+    title: String,
+    artist: String,
+}
+
+#[zbus::interface(name = "io.github.Githyot.AraraMusic.Lyrics")]
+impl LyricsIface {
+    #[zbus(property)]
+    fn line(&self) -> String {
+        self.line.clone()
+    }
+    #[zbus(property)]
+    fn next(&self) -> String {
+        self.next.clone()
+    }
+    #[zbus(property)]
+    fn title(&self) -> String {
+        self.title.clone()
+    }
+    #[zbus(property)]
+    fn artist(&self) -> String {
+        self.artist.clone()
+    }
+    #[zbus(signal)]
+    async fn lyric_changed(ctxt: &SignalContext<'_>, line: &str, next: &str, title: &str, artist: &str) -> zbus::Result<()>;
+}
+
+/// Holds a "don't suspend" request from the Inhibit portal; dropping it releases it.
+pub struct Inhibitor {
+    conn: Connection,
+    handle: zbus::zvariant::OwnedObjectPath,
+}
+
+impl Inhibitor {
+    pub fn start(reason: &str) -> Option<Self> {
+        let conn = Connection::session().ok()?;
+        let proxy = zbus::blocking::Proxy::new(
+            &conn,
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Inhibit",
+        )
+        .ok()?;
+        let mut opts: HashMap<&str, Value> = HashMap::new();
+        opts.insert("reason", Value::from(reason));
+        // 4 = suspend
+        let handle: zbus::zvariant::OwnedObjectPath = proxy.call("Inhibit", &("", 4u32, opts)).ok()?;
+        Some(Self { conn, handle })
+    }
+}
+
+impl Drop for Inhibitor {
+    fn drop(&mut self) {
+        if let Ok(p) = zbus::blocking::Proxy::new(&self.conn, "org.freedesktop.portal.Desktop", self.handle.as_str(), "org.freedesktop.portal.Request") {
+            let _: zbus::Result<()> = p.call("Close", &());
+        }
+    }
 }
 
 #[zbus::interface(name = "org.mpris.MediaPlayer2")]
@@ -230,6 +299,7 @@ impl Mpris {
         let conn = connection::Builder::session()?
             .name(format!("org.mpris.MediaPlayer2.arara.instance{}", std::process::id()))?
             .serve_at(PATH, Root { handler: handler.clone() })?
+            .serve_at(LYRICS_PATH, LyricsIface::default())?
             .serve_at(
                 PATH,
                 Player {
@@ -273,6 +343,22 @@ impl Mpris {
             p.volume = volume;
             let _ = zbus::block_on(p.volume_changed(ctx));
         }
+    }
+
+    /// Publish the lyric line being sung (empty when the track has no synced lyrics).
+    pub fn lyric_line(&self, line: &str, next: &str, title: &str, artist: &str) {
+        let Ok(iface) = self.conn.object_server().interface::<_, LyricsIface>(LYRICS_PATH) else { return };
+        let ctx = iface.signal_context();
+        let mut l = iface.get_mut();
+        if l.line == line && l.title == title {
+            return;
+        }
+        l.line = line.into();
+        l.next = next.into();
+        l.title = title.into();
+        l.artist = artist.into();
+        let _ = zbus::block_on(LyricsIface::lyric_changed(ctx, line, next, title, artist));
+        let _ = zbus::block_on(l.line_changed(ctx));
     }
 
     /// Position is polled by clients (not change-notified), so this is cheap to call often.

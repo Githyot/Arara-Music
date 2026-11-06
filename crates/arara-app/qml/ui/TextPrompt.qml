@@ -42,11 +42,11 @@ Popup {
     focus: true
     padding: 24
     Overlay.modal: Rectangle { color: "#4d000000" }
-    background: Rectangle { radius: 18; color: Theme.dark ? "#36363a" : "#ffffff" }
+    background: Rectangle { radius: Theme.dialogRadius; color: Theme.popupBg; border.color: Theme.border; border.width: Theme.fluent || Theme.apple ? 1 : 0 }
 
     contentItem: Column {
         spacing: 12
-        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; text: dlg.heading; color: Theme.fg; font.family: Theme.font; font.pointSize: 15; font.weight: Font.Bold }
+        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; text: dlg.heading; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.headingSize; font.weight: Theme.headingWeight }
         Text { visible: text !== ""; width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; text: dlg.body; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
         Rectangle {
             visible: dlg.needsText

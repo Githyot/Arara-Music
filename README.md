@@ -16,6 +16,10 @@ Player de música para Linux em **Rust + Qt/QML**, com visual inspirado no GNOME
 - Importa playlists e curtidas do **Apple Music** (Library.xml) e do **YouTube Music** (Google Takeout), além de CSV/M3U/XSPF, casando com as músicas que você tem
 - Normalização de volume (ReplayGain), volume lembrado, menu principal e janela adaptável a telas estreitas
 - Arrastar para reordenar fila e playlists; ordenação natural ("Artista 2" antes de "Artista 10")
+- Player à direita com abas Player / Fila / Letra, reprodução automática e tela de letra estilo karaokê
+- Rolagem rápida com índice A–Z; gêneros, anos, compositores, pastas e coleções
+- Busca com filtros (`artista:`, `genero:`, `ano:2010-2019`, `pasta:`…), ordenação e playlists inteligentes
+- Várias pastas de música, selo Hi-Res/Sem perdas, letras baixadas em segundo plano
 - Testado com 50 mil faixas: indexa em ~4 s e abre a janela em ~0,2 s
 
 Veja a análise e as medições em [docs/ANALISE.md](docs/ANALISE.md).

@@ -2,17 +2,20 @@ import QtQuick
 import AraraStyle
 import QtQuick.Layouts
 
-// Client-side header bar like AdwHeaderBar: drag to move, double-click to
-// maximize, window controls on the right (GNOME default layout: close only).
+// Client-side header bar: drag to move, double-click to maximize.
+// GNOME centres the title; macOS, Material and Fluent put it on the left.
 Rectangle {
     id: bar
     property string title: ""
     property string subtitle: ""
     property bool showControls: true
+    property bool allWindowButtons: false
+    property bool divider: !Theme.material && !Theme.apple
     property alias leading: leadingRow.data
     property alias trailing: trailingRow.data
     property color background: Theme.headerBg
     property var window: null
+    readonly property bool centred: Theme.gnome
 
     height: Theme.headerHeight
     color: background
@@ -30,18 +33,31 @@ Rectangle {
         spacing: 6
     }
 
-    Column {
-        anchors.centerIn: parent
-        width: Math.min(implicitWidth, bar.width - leadingRow.width - trailingRow.width - 120)
+    // Title: centred across the bar (GNOME) or right after the leading buttons.
+    Item {
+        id: titleBox
+        readonly property real side: Math.max(leadingRow.width + 6, trailingRow.width + controls.width + 12) + 12
+        x: bar.centred ? side : leadingRow.x + leadingRow.width + (leadingRow.width > 0 ? 10 : (Theme.material ? 16 : 12))
+        width: Math.max(0, bar.centred ? bar.width - 2 * side : trailingRow.x - x - 12)
+        height: titleText.height + (subText.visible ? subText.height : 0)
+        anchors.verticalCenter: parent.verticalCenter
+        visible: width > 40
         Text {
-            anchors.horizontalCenter: parent.horizontalCenter
+            id: titleText
+            width: parent.width
+            horizontalAlignment: bar.centred ? Text.AlignHCenter : Text.AlignLeft
             text: bar.title
             color: Theme.fg
-            font.family: Theme.font; font.pointSize: Theme.fontSize; font.weight: Font.Bold
+            font.family: Theme.material ? Theme.displayFont : Theme.font
+            font.pointSize: Theme.material ? Theme.fontSize + 4 : Theme.apple ? Theme.fontSize + 2 : Theme.fontSize
+            font.weight: Theme.material || Theme.fluent ? Font.Normal : Font.Bold
             elide: Text.ElideRight
         }
         Text {
-            anchors.horizontalCenter: parent.horizontalCenter
+            id: subText
+            anchors.top: titleText.bottom
+            width: parent.width
+            horizontalAlignment: titleText.horizontalAlignment
             visible: bar.subtitle !== ""
             text: bar.subtitle
             color: Theme.dimFg
@@ -52,21 +68,18 @@ Rectangle {
 
     RowLayout {
         id: trailingRow
-        anchors { right: controls.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+        anchors { right: controls.left; rightMargin: controls.width > 0 ? 6 : 6; verticalCenter: parent.verticalCenter }
         spacing: 6
     }
 
-    Row {
+    WindowControls {
         id: controls
-        visible: bar.showControls && bar.window !== null
+        visible: bar.showControls && bar.window !== null && !Theme.apple
         width: visible ? implicitWidth : 0
-        anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
-        FlatButton {
-            icon: "close"; circular: true; size: 24
-            color: hovered ? Theme.pressed : Theme.hover
-            onClicked: bar.window.close()
-        }
+        all: bar.allWindowButtons
+        window: bar.window
+        anchors { right: parent.right; rightMargin: Theme.fluent ? 0 : 6; top: Theme.fluent ? parent.top : undefined; verticalCenter: Theme.fluent ? undefined : parent.verticalCenter }
     }
 
-    Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: Theme.border; opacity: 0.6 }
+    Rectangle { visible: bar.divider; anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: Theme.border; opacity: 0.6 }
 }

@@ -37,6 +37,9 @@ pub struct Line {
     pub words: Vec<Word>,
     /// true when word timings came from the file, false when interpolated.
     pub word_synced: bool,
+    /// Who sings it: 0 = main voice (left), 1 = another singer (right),
+    /// 2 = background vocals "(…)" (small, under the line before).
+    pub voice: u8,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +154,7 @@ pub fn parse_lrc(src: &str, duration_ms: Option<u64>) -> Vec<Line> {
                 text: text.clone(),
                 words: words.iter().map(shift).collect(),
                 word_synced,
+                voice: 0,
             });
         }
     }
@@ -172,10 +176,71 @@ pub fn parse_lrc(src: &str, duration_ms: Option<u64>) -> Vec<Line> {
                 }
             }
         } else if !l.text.is_empty() {
-            l.words = interpolate_words(&l.text, l.start_ms, next);
+            // Words are sung at speech pace, not stretched over an instrumental gap.
+            let chars = l.text.chars().filter(|c| c.is_alphanumeric()).count() as u64;
+            let sung = (chars * 85 + 700).max(1200);
+            l.words = interpolate_words(&l.text, l.start_ms, next.min(l.start_ms + sung));
         }
     }
+    assign_voices(&mut lines);
     lines
+}
+
+/// Duets: "v1:"/"v2:" markers (Apple-style exports) or "Name: words" prefixes that
+/// repeat through the song. The first singer stays on the left, the others go to
+/// the right; a voice carries over until the next marker. Lines fully in
+/// parentheses are background vocals.
+fn assign_voices(lines: &mut [Line]) {
+    fn prefix(text: &str) -> Option<(String, usize)> {
+        let i = text.find(':')?;
+        let name = text[..i].trim();
+        let ok = !name.is_empty() && name.chars().count() <= 24 && name.split_whitespace().count() <= 3
+            && !name.chars().any(|c| c.is_ascii_digit() && !name.to_lowercase().starts_with('v'));
+        ok.then(|| (name.to_lowercase(), i + 1))
+    }
+    use std::collections::HashMap;
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for l in lines.iter() {
+        if let Some((n, _)) = prefix(&l.text) {
+            *counts.entry(n).or_default() += 1;
+        }
+    }
+    let is_marker = |n: &str| matches!(n, "v1" | "v2" | "v3") || counts.get(n).copied().unwrap_or(0) >= 2;
+    let mut order: Vec<String> = Vec::new();
+    let mut voice = 0u8;
+    for l in lines.iter_mut() {
+        if let Some((n, cut)) = prefix(&l.text).filter(|(n, _)| is_marker(n)) {
+            voice = match n.as_str() {
+                "v1" => 0,
+                "v2" | "v3" => 1,
+                _ => {
+                    if !order.contains(&n) {
+                        order.push(n.clone());
+                    }
+                    if order[0] == n { 0 } else { 1 }
+                }
+            };
+            // Drop the marker from the text and from the first word(s).
+            let mut left = cut;
+            l.text = l.text[cut..].trim_start().to_string();
+            l.words.retain_mut(|w| {
+                let wl = w.text.len();
+                if left == 0 {
+                    return true;
+                }
+                if wl <= left {
+                    left -= wl;
+                    false
+                } else {
+                    w.text = w.text[left..].trim_start().to_string();
+                    left = 0;
+                    !w.text.is_empty()
+                }
+            });
+        }
+        let t = l.text.trim();
+        l.voice = if t.len() > 2 && t.starts_with('(') && t.ends_with(')') { 2 } else { voice };
+    }
 }
 
 /// Spread a line's duration across its words, weighted by character count.
@@ -233,7 +298,8 @@ impl Default for LrclibClient {
 }
 
 impl LrclibClient {
-    pub fn get(&self, title: &str, artist: &str, album: &str, duration_s: u64) -> Option<LrclibRecord> {
+    /// Exact lookup. Ok(None) = LRCLIB doesn't know the song; Err = network/server problem.
+    pub fn get(&self, title: &str, artist: &str, album: &str, duration_s: u64) -> std::result::Result<Option<LrclibRecord>, String> {
         let mut req = self
             .agent
             .get(&format!("{LRCLIB}/get"))
@@ -243,28 +309,111 @@ impl LrclibClient {
         if !album.is_empty() {
             req = req.query("album_name", album);
         }
-        req.call().ok()?.into_json().ok()
+        match req.call() {
+            Ok(r) => Ok(r.into_json::<LrclibRecord>().ok().filter(|r| r.synced_lyrics.is_some() || r.plain_lyrics.is_some())),
+            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
-    pub fn search(&self, title: &str, artist: &str, duration_s: u64) -> Option<LrclibRecord> {
-        let list: Vec<LrclibRecord> = self
-            .agent
-            .get(&format!("{LRCLIB}/search"))
-            .query("track_name", title)
-            .query("artist_name", artist)
-            .call()
-            .ok()?
-            .into_json()
-            .ok()?;
-        list.into_iter()
+    /// Fuzzy search; picks the closest duration, preferring synced lyrics.
+    pub fn search(&self, title: &str, artist: &str, duration_s: u64) -> std::result::Result<Option<LrclibRecord>, String> {
+        let mut req = self.agent.get(&format!("{LRCLIB}/search"));
+        req = if artist.is_empty() { req.query("q", title) } else { req.query("track_name", title).query("artist_name", artist) };
+        let list: Vec<LrclibRecord> = match req.call() {
+            Ok(r) => r.into_json().unwrap_or_default(),
+            Err(ureq::Error::Status(404, _)) => vec![],
+            Err(e) => return Err(e.to_string()),
+        };
+        Ok(list
+            .into_iter()
             .filter(|r| r.synced_lyrics.is_some() || r.plain_lyrics.is_some())
+            .filter(|r| duration_s == 0 || (r.duration.unwrap_or(0.0) - duration_s as f64).abs() < 10.0)
             .min_by_key(|r| {
                 let d = (r.duration.unwrap_or(0.0) - duration_s as f64).abs() as i64;
                 // prefer synced: penalise plain-only results
                 d + if r.synced_lyrics.is_some() { 0 } else { 1000 }
-            })
-            .filter(|r| (r.duration.unwrap_or(0.0) - duration_s as f64).abs() < 10.0)
+            }))
     }
+
+    /// Tries the exact match, then cleaned-up titles/artists ("Song (feat. X)" → "Song",
+    /// "A, B & C" → "A"), then a free-text search. Err only if every attempt failed on the network.
+    pub fn find(&self, title: &str, artist: &str, album: &str, duration_s: u64) -> std::result::Result<Option<LrclibRecord>, String> {
+        let clean_t = clean_title(title);
+        let main_a = main_artist(artist);
+        let mut attempts: Vec<Box<dyn Fn() -> std::result::Result<Option<LrclibRecord>, String> + '_>> = vec![
+            Box::new(|| self.get(title, artist, album, duration_s)),
+            Box::new(|| self.search(title, artist, duration_s)),
+        ];
+        if clean_t != title || main_a != artist {
+            attempts.push(Box::new(|| self.get(&clean_t, &main_a, "", duration_s)));
+            attempts.push(Box::new(|| self.search(&clean_t, &main_a, duration_s)));
+        }
+        attempts.push(Box::new(|| self.search(&format!("{main_a} {clean_t}"), "", duration_s)));
+        let mut last_err = None;
+        let mut any_ok = false;
+        let mut plain: Option<LrclibRecord> = None;
+        for a in attempts {
+            match a() {
+                Ok(Some(r)) if r.synced_lyrics.is_some() => return Ok(Some(r)),
+                Ok(Some(r)) => {
+                    any_ok = true;
+                    plain.get_or_insert(r);
+                }
+                Ok(None) => any_ok = true,
+                Err(e) => last_err = Some(e),
+            }
+        }
+        match (plain, any_ok, last_err) {
+            (Some(r), _, _) => Ok(Some(r)),
+            (None, false, Some(e)) => Err(e),
+            _ => Ok(None),
+        }
+    }
+}
+
+/// "Baile 01 (feat. A, B)" → "Baile 01"; also drops "[Remastered]", "- Remastered 2011",
+/// "(Official Video)". Version markers that change the recording — "(Remix)", "(Ao Vivo)",
+/// "(Acoustic)" — are kept, or a remix would get the original's timings.
+pub fn clean_title(t: &str) -> String {
+    const NOISE: [&str; 12] = [
+        "feat", "ft.", "with ", "remaster", "explicit", "clean", "official", "video", "lyric", "bonus", "deluxe", "mono",
+    ];
+    let mut out = String::new();
+    let mut rest = t;
+    while let Some(a) = rest.find(['(', '[']) {
+        let close = if rest.as_bytes()[a] == b'(' { ')' } else { ']' };
+        let Some(len) = rest[a..].find(close) else { break };
+        let inner = rest[a + 1..a + len].to_lowercase();
+        out.push_str(&rest[..a]);
+        if !NOISE.iter().any(|n| inner.contains(n)) {
+            out.push_str(&rest[a..=a + len]);
+        }
+        rest = &rest[a + len + 1..];
+    }
+    out.push_str(rest);
+    let lower = out.to_lowercase();
+    for cut in [" - remaster", " - single", " - radio edit", " feat.", " ft.", " featuring "] {
+        if let Some(i) = lower.find(cut) {
+            out.truncate(i);
+            break;
+        }
+    }
+    let s = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.is_empty() { t.trim().to_string() } else { s }
+}
+
+/// "1Kilo, Knust & Pelé" / "A feat. B" → "1Kilo"
+pub fn main_artist(a: &str) -> String {
+    let lower = a.to_lowercase();
+    let mut end = a.len();
+    for sep in [",", " & ", " feat", " ft.", " x ", " e ", ";", "/"] {
+        if let Some(i) = lower.find(sep) {
+            end = end.min(i);
+        }
+    }
+    let s = a[..end].trim();
+    if s.is_empty() { a.trim().to_string() } else { s.to_string() }
 }
 
 // ---------------- writing LRC & publishing ----------------
@@ -383,48 +532,74 @@ fn embedded(path: &Path) -> Option<String> {
     t.get_string(&ItemKey::Lyrics).map(str::to_owned)
 }
 
+/// Tracks that still need a lyrics lookup (never tried, or a "none" answer older than
+/// the negative TTL), most-played and recently played first.
+pub fn pending_tracks(db: &Db) -> Result<Vec<i64>> {
+    let mut st = db.conn.prepare(
+        "SELECT t.id FROM tracks t LEFT JOIN lyrics l ON l.track_id = t.id
+         WHERE l.track_id IS NULL OR (l.source = 'none' AND l.fetched_at < ?1)
+         ORDER BY t.play_count DESC, COALESCE(t.last_played, 0) DESC, t.starred DESC, t.album_id, t.disc_no, t.track_no",
+    )?;
+    let rows = st.query_map([now() - NEGATIVE_TTL_SECS], |r| r.get(0))?;
+    Ok(rows.flatten().collect())
+}
+
 /// Resolve lyrics for a track id. `online` = allow LRCLIB requests.
 pub fn resolve(db: &Db, client: Option<&LrclibClient>, track_id: i64) -> Result<Lyrics> {
     let Some(t) = db.track(track_id)? else { return Ok(Lyrics::None) };
     let dur = t.duration_ms as u64;
 
     if let Some((source, synced, plain)) = db.cached_lyrics(track_id)? {
-        let stale_negative = source == "none"
+        // A "none" answer, or words without timings, is looked up online again after a while.
+        let ttl = if source == "none" { NEGATIVE_TTL_SECS } else { 3600 };
+        let retry = source != "user"
+            && (source == "none" || synced.is_none())
+            && client.is_some()
             && db
                 .conn
                 .query_row("SELECT fetched_at FROM lyrics WHERE track_id=?1", [track_id], |r| r.get::<_, i64>(0))
-                .map(|f| now() - f > NEGATIVE_TTL_SECS)
+                .map(|f| now() - f > ttl)
                 .unwrap_or(true);
-        if !stale_negative {
+        if !retry {
             return Ok(to_lyrics(synced, plain, dur));
         }
     }
 
+    // Local lyrics first. Plain-only local lyrics are kept, but we still look online for a synced version.
     let path = Path::new(&t.path);
-    if let Some((s, p)) = sidecar(path) {
-        db.store_lyrics(track_id, "sidecar", s.as_deref(), p.as_deref(), now())?;
-        return Ok(to_lyrics(s, p, dur));
-    }
-    if let Some(e) = embedded(path) {
-        let (s, p) = if looks_synced(&e) { (Some(e), None) } else { (None, Some(e)) };
-        db.store_lyrics(track_id, "embedded", s.as_deref(), p.as_deref(), now())?;
-        return Ok(to_lyrics(s, p, dur));
+    let local = sidecar(path).map(|(s, p)| ("sidecar", s, p)).or_else(|| {
+        embedded(path).map(|e| if looks_synced(&e) { ("embedded", Some(e), None) } else { ("embedded", None, Some(e)) })
+    });
+    if let Some((src, Some(s), p)) = &local {
+        db.store_lyrics(track_id, src, Some(s), p.as_deref(), now())?;
+        return Ok(to_lyrics(Some(s.clone()), p.clone(), dur));
     }
 
     if let Some(c) = client {
-        let secs = dur / 1000;
         let album = t.album.clone().unwrap_or_default();
-        let rec = c
-            .get(&t.title, &t.artist, &album, secs)
-            .filter(|r| r.synced_lyrics.is_some() || r.plain_lyrics.is_some())
-            .or_else(|| c.search(&t.title, &t.artist, secs));
-        match rec {
-            Some(r) => {
+        match c.find(&t.title, &t.artist, &album, dur / 1000) {
+            Ok(Some(r)) if r.synced_lyrics.is_some() || local.is_none() => {
                 db.store_lyrics(track_id, "lrclib", r.synced_lyrics.as_deref(), r.plain_lyrics.as_deref(), now())?;
                 return Ok(to_lyrics(r.synced_lyrics, r.plain_lyrics, dur));
             }
-            None => db.store_lyrics(track_id, "none", None, None, now())?,
+            Ok(_) => {
+                if local.is_none() {
+                    db.store_lyrics(track_id, "none", None, None, now())?;
+                }
+            }
+            // Offline or LRCLIB down: don't remember a "no lyrics" answer, try again next time.
+            // Offline: show local words but don't cache them, so LRCLIB is asked next time.
+            Err(e) => {
+                log::info!("LRCLIB unreachable for track {track_id}: {e}");
+                if let Some((_, s, p)) = local {
+                    return Ok(to_lyrics(s, p, dur));
+                }
+            }
         }
+    }
+    if let Some((src, s, p)) = local {
+        db.store_lyrics(track_id, src, s.as_deref(), p.as_deref(), now())?;
+        return Ok(to_lyrics(s, p, dur));
     }
     Ok(Lyrics::None)
 }
@@ -453,6 +628,18 @@ mod tests {
     }
 
     #[test]
+    fn cleans_titles_and_artists() {
+        assert_eq!(clean_title("Baile 01 (feat. Pablo Martins, Knust & Funkeiro)"), "Baile 01");
+        assert_eq!(clean_title("Help! - Remastered 2009"), "Help!");
+        assert_eq!(clean_title("(Intro)"), "(Intro)");
+        assert_eq!(clean_title("Diamonds (Remix) [feat. Kanye West]"), "Diamonds (Remix)");
+        assert_eq!(clean_title("Song (Official Video) (Ao Vivo)"), "Song (Ao Vivo)");
+        assert_eq!(main_artist("1Kilo, Knust & Pelé"), "1Kilo");
+        assert_eq!(main_artist("Anitta feat. X"), "Anitta");
+        assert_eq!(main_artist("Tim Maia"), "Tim Maia");
+    }
+
+    #[test]
     fn timestamps() {
         assert_eq!(parse_ts("01:02.5"), Some(62_500));
         assert_eq!(parse_ts("01:02.50"), Some(62_500));
@@ -469,6 +656,20 @@ mod tests {
         assert!(!l[0].word_synced);
         assert_eq!(l[0].words[0].start_ms, 1000);
         assert_eq!(l[1].end_ms, 5000);
+    }
+
+    #[test]
+    fn duet_voices() {
+        let l = parse_lrc(
+            "[00:01.00]Rihanna: Shine bright\n[00:03.00]like a diamond\n[00:05.00]Kanye: Yeah\n[00:07.00](Ooh)\n[00:09.00]Rihanna: Again\n[00:11.00]Kanye: Ok",
+            Some(13_000),
+        );
+        assert_eq!(l.iter().map(|x| x.voice).collect::<Vec<_>>(), vec![0, 0, 1, 2, 0, 1]);
+        assert_eq!(l[0].text, "Shine bright");
+        assert_eq!(l[0].words.iter().map(|w| w.text.trim()).collect::<Vec<_>>(), vec!["Shine", "bright"]);
+        // A one-off "Note: ..." is not a singer.
+        let l = parse_lrc("[00:01.00]Note: hi\n[00:02.00]x", None);
+        assert_eq!((l[0].voice, l[0].text.as_str()), (0, "Note: hi"));
     }
 
     #[test]

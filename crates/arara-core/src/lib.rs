@@ -2,10 +2,13 @@
 //! Toolkit-agnostic; the Qt/QML front-end lives in `arara-app`.
 
 pub mod covers;
+pub mod downloads;
+pub mod freemusic;
 pub mod db;
 pub mod import;
 pub mod lyrics;
 pub mod natural;
+pub mod query;
 pub mod remote;
 pub mod scanner;
 pub mod watcher;

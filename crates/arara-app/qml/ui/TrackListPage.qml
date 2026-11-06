@@ -41,7 +41,7 @@ Item {
                 x: page.side; y: 24
                 width: lv.width - 2 * page.side
                 spacing: 6
-                Text { text: page.title; color: Theme.fg; font.family: Theme.font; font.pointSize: 20; font.weight: Font.Bold; width: parent.width; elide: Text.ElideRight }
+                Text { text: page.title; color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.titleSize; font.weight: Theme.titleWeight; width: parent.width; elide: Text.ElideRight }
                 Text { visible: text !== ""; text: page.subtitle; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
                 Item { width: 1; height: 6 }
                 Row {
@@ -97,7 +97,7 @@ Item {
         anchors.centerIn: parent
         visible: page.tracks.length === 0
         spacing: 8
-        Text { anchors.horizontalCenter: parent.horizontalCenter; text: page.emptyText; color: Theme.fg; font.family: Theme.font; font.pointSize: 16; font.weight: Font.Bold }
+        Text { anchors.horizontalCenter: parent.horizontalCenter; text: page.emptyText; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.headingSize + 1; font.weight: Theme.headingWeight }
         Text { anchors.horizontalCenter: parent.horizontalCenter; visible: text !== ""; text: page.emptyHint; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
     }
 }

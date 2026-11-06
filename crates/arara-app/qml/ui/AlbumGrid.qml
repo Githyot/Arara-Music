@@ -9,9 +9,11 @@ GridView {
     property var albums: []
     signal openAlbum(var album)
 
-    // 180 px tiles, but never fewer than two columns (tiles shrink on narrow windows).
-    readonly property int columns: Math.max(2, Math.floor((width - 24) / 204))
-    readonly property int tile: Math.min(180, Math.floor((width - 24) / columns) - 20)
+    // As many columns as fit tiles of at least Theme.tileMin, then the tiles grow
+    // to fill the row, so there is never a wide empty gutter.
+    readonly property int gap: Theme.compact ? 14 : 20
+    readonly property int columns: Math.max(2, Math.floor((width - 24 + gap) / (Theme.tileMin + gap)))
+    readonly property int tile: Math.floor((width - 24) / columns) - gap
     cellWidth: Math.floor((width - 24) / columns)
     cellHeight: tile + 64
     leftMargin: 12; rightMargin: 12; topMargin: 18; bottomMargin: 18
@@ -31,29 +33,14 @@ GridView {
             width: grid.tile
             spacing: 6
 
-            Rectangle {
+            CoverArt {
                 id: art
                 width: grid.tile; height: grid.tile
-                radius: Theme.radius + 2
-                color: Theme.cardBg
-                clip: true
-                border.color: Theme.border; border.width: 0.5
-
-                Image {
-                    anchors.fill: parent
-                    source: modelData.cover
-                    sourceSize: Qt.size(grid.tile, grid.tile)
-                    asynchronous: true
-                    cache: false          // thumbnails are already on disk; don't pin them in RAM
-                    fillMode: Image.PreserveAspectCrop
-                    visible: status === Image.Ready
-                }
-                Icon {
-                    anchors.centerIn: parent
-                    visible: modelData.cover === ""
-                    name: "albums"; size: 64; color: Theme.dimFg
-                }
-                Rectangle { anchors.fill: parent; color: "white"; opacity: ma.containsMouse ? 0.08 : 0; radius: parent.radius }
+                decode: grid.tile
+                source: modelData.cover
+                hovered: ma.containsMouse
+                scale: ma.pressed ? 0.97 : 1
+                Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
             }
             Text {
                 width: parent.width

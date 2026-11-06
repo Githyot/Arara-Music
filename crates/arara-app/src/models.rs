@@ -35,6 +35,20 @@ pub mod qobject {
         #[qinvokable]
         fn search(self: Pin<&mut TrackModel>, query: &QString);
 
+        /// Search with filters (artista:, genero:, ano:, pasta:…) and a sort order
+        /// ("artist", "title", "album", "added", "year", "plays", "duration").
+        #[qinvokable]
+        fn query(self: Pin<&mut TrackModel>, query: &QString, sort: &QString);
+
+        /// JSON [{l: "A", row: 0}, …]: first row of each index letter (or year).
+        #[qinvokable]
+        fn sections(self: &TrackModel) -> QString;
+
+        /// Index letter (or year) of one row, for the scroll bubble.
+        #[qinvokable]
+        #[cxx_name = "sectionAt"]
+        fn section_at(self: &TrackModel, row: i32) -> QString;
+
         /// JSON array of track objects for rows [from, from+count) — used to build a play queue.
         #[qinvokable]
         #[cxx_name = "sliceJson"]
@@ -72,7 +86,7 @@ use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use std::path::PathBuf;
 
-const ROLES: &[&str] = &["trackId", "title", "artist", "album", "albumId", "duration", "starred", "cover", "coverBig", "url", "remote"];
+const ROLES: &[&str] = &["trackId", "title", "artist", "album", "albumId", "duration", "starred", "cover", "coverBig", "url", "remote", "quality"];
 
 pub struct TrackModelRust {
     count: i32,
@@ -80,6 +94,7 @@ pub struct TrackModelRust {
     db_path: PathBuf,
     covers_dir: PathBuf,
     resolver: remote::Resolver,
+    sort: String,
 }
 
 impl Default for TrackModelRust {
@@ -91,7 +106,7 @@ impl Default for TrackModelRust {
         if let Ok(v) = std::env::var("ARARA_COVERS") {
             p.covers = v.into();
         }
-        Self { count: 0, rows: Vec::new(), db_path: p.db, covers_dir: p.covers, resolver: Default::default() }
+        Self { count: 0, rows: Vec::new(), db_path: p.db, covers_dir: p.covers, resolver: Default::default(), sort: String::new() }
     }
 }
 
@@ -107,7 +122,8 @@ impl TrackModelRust {
             "id": t.id, "title": t.title, "artist": t.artist, "album": t.album,
             "albumId": t.album_id, "duration": t.duration_ms, "starred": t.starred,
             "url": self.resolver.url(&t.path), "remote": remote::is_remote(&t.path),
-            "gain": t.track_gain, "albumGain": t.album_gain,
+            "gain": t.track_gain, "albumGain": t.album_gain, "year": t.year, "genre": t.genre,
+            "quality": t.quality().0, "qualityDetail": t.quality().1,
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
         })
     }
@@ -129,12 +145,45 @@ impl qobject::TrackModel {
         self.replace_rows(rows);
     }
 
-    pub fn search(self: Pin<&mut Self>, query: &QString) {
+    pub fn search(mut self: Pin<&mut Self>, query: &QString) {
+        self.as_mut().rust_mut().sort = String::new();
         let q = query.to_string();
         let rows = Db::open(&self.db_path)
             .and_then(|db| if q.trim().is_empty() { db.all_tracks() } else { db.search(&q, 2000) })
             .unwrap_or_default();
         self.replace_rows(rows);
+    }
+
+    pub fn query(mut self: Pin<&mut Self>, query: &QString, sort: &QString) {
+        let (q, sort) = (query.to_string(), sort.to_string());
+        let rows = Db::open(&self.db_path)
+            .and_then(|db| db.query_tracks(&q, &sort, 0))
+            .unwrap_or_default();
+        // A relevance-ranked search has no index letters.
+        let has_text = !arara_core::query::parse(&q).text.is_empty();
+        self.as_mut().rust_mut().sort = if has_text && sort.is_empty() { "rank".into() } else { sort };
+        self.replace_rows(rows);
+    }
+
+    pub fn sections(&self) -> QString {
+        let mut out = Vec::new();
+        let mut last = String::new();
+        for (i, t) in self.rows.iter().enumerate() {
+            let l = arara_core::query::section_of(t, &self.sort);
+            if l.is_empty() {
+                break;
+            }
+            if l != last {
+                out.push(serde_json::json!({ "l": l, "row": i }));
+                last = l;
+            }
+        }
+        QString::from(serde_json::to_string(&out).unwrap().as_str())
+    }
+
+    pub fn section_at(&self, row: i32) -> QString {
+        let l = self.rows.get(row.max(0) as usize).map(|t| arara_core::query::section_of(t, &self.sort)).unwrap_or_default();
+        QString::from(l.as_str())
     }
 
     pub fn slice_json(&self, from: i32, count: i32) -> QString {
@@ -165,6 +214,7 @@ impl qobject::TrackModel {
             Some("coverBig") => s(&self.cover(&t.cover_hash, 640)),
             Some("url") => s(&self.resolver.url(&t.path)),
             Some("remote") => QVariant::from(&remote::is_remote(&t.path)),
+            Some("quality") => s(t.quality().0),
             _ => QVariant::default(),
         }
     }

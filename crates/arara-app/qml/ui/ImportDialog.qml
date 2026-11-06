@@ -27,7 +27,7 @@ Popup {
     padding: 24
     closePolicy: busy ? Popup.NoAutoClose : (Popup.CloseOnEscape | Popup.CloseOnPressOutside)
     Overlay.modal: Rectangle { color: "#4d000000" }
-    background: Rectangle { radius: 18; color: Theme.dark ? "#36363a" : "#ffffff" }
+    background: Rectangle { radius: Theme.dialogRadius; color: Theme.popupBg; border.color: Theme.border; border.width: Theme.fluent || Theme.apple ? 1 : 0 }
 
     FileDialog {
         id: fileDialog
@@ -55,7 +55,7 @@ Popup {
     contentItem: Column {
         spacing: 12
         Icon { anchors.horizontalCenter: parent.horizontalCenter; name: "import"; size: 44; color: Theme.dimFg }
-        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: dlg.report && dlg.report.ok ? "Importação concluída" : "Importar playlists e curtidas"; color: Theme.fg; font.family: Theme.font; font.pointSize: 15; font.weight: Font.Bold }
+        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: dlg.report && dlg.report.ok ? "Importação concluída" : "Importar playlists e curtidas"; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.headingSize; font.weight: Theme.headingWeight }
 
         // ---- instructions ----
         Column {

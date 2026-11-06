@@ -41,7 +41,15 @@ CREATE TABLE IF NOT EXISTS tracks (
     album_gain  REAL,
     starred     INTEGER NOT NULL DEFAULT 0,
     play_count  INTEGER NOT NULL DEFAULT 0,
-    last_played INTEGER
+    last_played INTEGER,
+    cover_hash  TEXT,              -- own art, for tracks without an album tag
+    genre       TEXT,
+    composer    TEXT,
+    added_at    INTEGER,
+    format      TEXT,              -- FLAC, MP3, Opus…
+    sample_rate INTEGER,
+    bit_depth   INTEGER,
+    bitrate     INTEGER             -- kbit/s
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id, disc_no, track_no);
 
@@ -59,8 +67,11 @@ CREATE TABLE IF NOT EXISTS lyrics (
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
-    id   INTEGER PRIMARY KEY,
-    name TEXT NOT NULL
+    id    INTEGER PRIMARY KEY,
+    name  TEXT NOT NULL,
+    query TEXT,                   -- smart playlist: a saved search (see query.rs)
+    sort  TEXT,
+    lim   INTEGER
 );
 CREATE TABLE IF NOT EXISTS playlist_items (
     playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
@@ -106,6 +117,12 @@ pub struct NewTrack<'a> {
     pub track_gain: Option<f64>,
     pub album_gain: Option<f64>,
     pub cover_hash: Option<&'a str>,
+    pub genre: Option<&'a str>,
+    pub composer: Option<&'a str>,
+    pub format: Option<&'a str>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
+    pub bitrate: Option<u32>,
 }
 
 /// Insert/update one track (plus its artist, album and search entry) on an open
@@ -134,6 +151,11 @@ pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
         c.execute("UPDATE albums SET cover_hash=?1 WHERE id=?2", params![hash, aid])?;
         cover_written = true;
     }
+    // A track without an album keeps its own picture (e.g. downloaded singles).
+    let track_cover = if album_id.is_none() { p.cover_hash } else { None };
+    if track_cover.is_some() {
+        cover_written = true;
+    }
 
     let old: Option<(i64, String, String, Option<String>)> = c
         .query_row(
@@ -149,15 +171,23 @@ pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
         )?;
     }
     c.execute(
-        "INSERT INTO tracks(path, mtime, size, title, artist, album_id, track_no, disc_no, year, duration_ms, track_gain, album_gain)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+        "INSERT INTO tracks(path, mtime, size, title, artist, album_id, track_no, disc_no, year, duration_ms,
+                            track_gain, album_gain, cover_hash, genre, composer, added_at,
+                            format, sample_rate, bit_depth, bitrate)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
          ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, title=excluded.title,
            artist=excluded.artist, album_id=excluded.album_id, track_no=excluded.track_no,
            disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,
-           track_gain=excluded.track_gain, album_gain=excluded.album_gain",
+           track_gain=excluded.track_gain, album_gain=excluded.album_gain,
+           cover_hash=COALESCE(excluded.cover_hash, CASE WHEN excluded.album_id IS NULL THEN tracks.cover_hash END),
+           genre=excluded.genre, composer=excluded.composer,
+           added_at=COALESCE(tracks.added_at, excluded.added_at),
+           format=excluded.format, sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth, bitrate=excluded.bitrate",
         params![
             p.path, p.mtime, p.size, p.title, p.artist, album_id, p.track_no, p.disc_no,
-            p.year, p.duration_ms, p.track_gain, p.album_gain
+            p.year, p.duration_ms, p.track_gain, p.album_gain, track_cover, p.genre, p.composer,
+            if p.mtime > 0 && !p.path.starts_with(crate::remote::PREFIX) { p.mtime } else { now },
+            p.format, p.sample_rate, p.bit_depth, p.bitrate
         ],
     )?;
     let tid: i64 = c.query_row("SELECT id FROM tracks WHERE path=?1", [p.path], |r| r.get(0))?;
@@ -212,6 +242,42 @@ pub struct TrackRow {
     /// ReplayGain in dB, when the file is tagged.
     pub track_gain: Option<f64>,
     pub album_gain: Option<f64>,
+    pub year: Option<i64>,
+    pub genre: Option<String>,
+    pub album_artist: Option<String>,
+    pub format: Option<String>,
+    pub sample_rate: Option<i64>,
+    pub bit_depth: Option<i64>,
+    pub bitrate: Option<i64>,
+}
+
+impl TrackRow {
+    /// Quality badge like Euphonica's: "Hi-Res", "Sem perdas" or "" (lossy),
+    /// plus a detail line ("FLAC · 24 bits · 96 kHz", "MP3 · 320 kbps").
+    pub fn quality(&self) -> (&'static str, String) {
+        let f = self.format.clone().unwrap_or_default();
+        let lossless = matches!(f.as_str(), "FLAC" | "ALAC" | "WAV" | "AIFF" | "WavPack" | "APE");
+        let rate = self.sample_rate.unwrap_or(0);
+        let bits = self.bit_depth.unwrap_or(0);
+        let grade = if lossless && (bits > 16 || rate > 48_000) { "Hi-Res" } else if lossless { "Sem perdas" } else { "" };
+        let mut parts = vec![];
+        if !f.is_empty() {
+            parts.push(f);
+        }
+        if lossless && bits > 0 {
+            parts.push(format!("{bits} bits"));
+        }
+        if rate > 0 {
+            let k = rate as f64 / 1000.0;
+            parts.push(if k.fract() == 0.0 { format!("{k:.0} kHz") } else { format!("{k:.1} kHz").replace('.', ",") });
+        }
+        if !lossless {
+            if let Some(b) = self.bitrate.filter(|b| *b > 0) {
+                parts.push(format!("{b} kbps"));
+            }
+        }
+        (grade, parts.join(" · "))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -228,10 +294,14 @@ pub struct PlaylistRow {
     pub name: String,
     pub track_count: i64,
     pub cover_hash: Option<String>,
+    /// (query, sort, limit) for smart playlists.
+    pub smart: Option<(String, String, i64)>,
 }
 
-const TRACK_COLS: &str =
-    "t.id, t.path, t.title, t.artist, a.title, t.album_id, t.duration_ms, t.starred, a.cover_hash, t.track_gain, t.album_gain";
+pub(crate) const TRACK_COLS: &str =
+    "t.id, t.path, t.title, t.artist, a.title, t.album_id, t.duration_ms, t.starred, COALESCE(a.cover_hash, t.cover_hash),
+     t.track_gain, t.album_gain, COALESCE(t.year, a.year), t.genre,
+     (SELECT name FROM artists WHERE id = a.artist_id), t.format, t.sample_rate, t.bit_depth, t.bitrate";
 
 #[derive(Debug, Clone)]
 pub struct AlbumRow {
@@ -267,12 +337,59 @@ impl Db {
              PRAGMA temp_store=MEMORY;
              PRAGMA cache_size=-8000;", // 8 MB page cache cap
         )?;
+        // Fast path: an up-to-date database needs no DDL and, above all, no
+        // write. Opening must never wait on the write lock (the scanner may
+        // hold it), or the UI thread freezes.
+        if Self::is_current(&conn) {
+            return Ok(Db { conn });
+        }
         conn.execute_batch(SCHEMA)?;
+        // v0.4 → v0.5: per-track art, genre, composer, "added" date. Old rows are
+        // re-read on the next scan (mtime reset) so the new fields get filled.
+        let has_genre: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('tracks') WHERE name='genre'")?
+            .exists([])?;
+        if !has_genre {
+            conn.execute_batch(
+                "ALTER TABLE tracks ADD COLUMN cover_hash TEXT;
+                 ALTER TABLE tracks ADD COLUMN genre TEXT;
+                 ALTER TABLE tracks ADD COLUMN composer TEXT;
+                 ALTER TABLE tracks ADD COLUMN added_at INTEGER;
+                 ALTER TABLE tracks ADD COLUMN format TEXT;
+                 ALTER TABLE tracks ADD COLUMN sample_rate INTEGER;
+                 ALTER TABLE tracks ADD COLUMN bit_depth INTEGER;
+                 ALTER TABLE tracks ADD COLUMN bitrate INTEGER;
+                 UPDATE tracks SET added_at = mtime;
+                 UPDATE tracks SET mtime = 0 WHERE path NOT LIKE 'remote://%';",
+            )?;
+        }
+        let has_smart: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('playlists') WHERE name='query'")?
+            .exists([])?;
+        if !has_smart {
+            conn.execute_batch(
+                "ALTER TABLE playlists ADD COLUMN query TEXT;
+                 ALTER TABLE playlists ADD COLUMN sort TEXT;
+                 ALTER TABLE playlists ADD COLUMN lim INTEGER;",
+            )?;
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre COLLATE NOCASE);
+             CREATE INDEX IF NOT EXISTS tracks_added ON tracks(added_at);",
+        )?;
         conn.execute(
             "INSERT OR IGNORE INTO kv(k, v) VALUES ('schema_version', ?1)",
             [SCHEMA_VERSION.to_string()],
         )?;
         Ok(Db { conn })
+    }
+
+    fn is_current(conn: &Connection) -> bool {
+        let q = |sql: &str| conn.prepare(sql).and_then(|mut st| st.exists([])).unwrap_or(false);
+        q("SELECT 1 FROM kv WHERE k='schema_version'")
+            && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='genre'")
+            && q("SELECT 1 FROM pragma_table_info('playlists') WHERE name='query'")
+            && q("SELECT 1 FROM sqlite_master WHERE type='index' AND name='tracks_added'")
     }
 
     pub fn artist_id(&self, name: &str) -> Result<i64> {
@@ -452,14 +569,49 @@ impl Db {
             "SELECT p.id, p.name, COUNT(i.track_id),
                     (SELECT a.cover_hash FROM playlist_items i2 JOIN tracks t ON t.id = i2.track_id
                      JOIN albums a ON a.id = t.album_id WHERE i2.playlist_id = p.id AND a.cover_hash IS NOT NULL
-                     ORDER BY i2.pos LIMIT 1)
+                     ORDER BY i2.pos LIMIT 1), p.query, p.sort, p.lim
              FROM playlists p LEFT JOIN playlist_items i ON i.playlist_id = p.id
              GROUP BY p.id ORDER BY p.name COLLATE NATSORT",
         )?;
         let rows = st.query_map([], |r| {
-            Ok(PlaylistRow { id: r.get(0)?, name: r.get(1)?, track_count: r.get(2)?, cover_hash: r.get(3)? })
+            Ok(PlaylistRow {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                track_count: r.get(2)?,
+                cover_hash: r.get(3)?,
+                smart: r.get::<_, Option<String>>(4)?.map(|q| (q, r.get(5).unwrap_or_default(), r.get(6).unwrap_or(0))),
+            })
         })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        let mut out: Vec<PlaylistRow> = rows.collect::<std::result::Result<_, _>>()?;
+        // Smart playlists: count and cover come from the saved search.
+        for p in out.iter_mut() {
+            if let Some((q, sort, lim)) = &p.smart {
+                let t = self.query_tracks(q, sort, *lim)?;
+                p.track_count = t.len() as i64;
+                p.cover_hash = t.iter().find_map(|t| t.cover_hash.clone());
+            }
+        }
+        Ok(out)
+    }
+
+    /// Create or update a smart playlist (a saved search with a sort order and an optional limit).
+    pub fn save_smart_playlist(&self, id: Option<i64>, name: &str, query: &str, sort: &str, limit: i64) -> Result<i64> {
+        match id {
+            Some(id) => {
+                self.conn.execute(
+                    "UPDATE playlists SET name=?1, query=?2, sort=?3, lim=?4 WHERE id=?5",
+                    params![name, query, sort, limit, id],
+                )?;
+                Ok(id)
+            }
+            None => {
+                self.conn.execute(
+                    "INSERT INTO playlists(name, query, sort, lim) VALUES (?1,?2,?3,?4)",
+                    params![name, query, sort, limit],
+                )?;
+                Ok(self.conn.last_insert_rowid())
+            }
+        }
     }
 
     pub fn create_playlist(&self, name: &str) -> Result<i64> {
@@ -533,6 +685,13 @@ impl Db {
     }
 
     pub fn playlist_tracks(&self, playlist_id: i64) -> Result<Vec<TrackRow>> {
+        let smart: Option<(Option<String>, Option<String>, Option<i64>)> = self
+            .conn
+            .query_row("SELECT query, sort, lim FROM playlists WHERE id=?1", [playlist_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional()?;
+        if let Some((Some(q), sort, lim)) = smart {
+            return self.query_tracks(&q, sort.as_deref().unwrap_or(""), lim.unwrap_or(0));
+        }
         let mut st = self.conn.prepare_cached(&format!(
             "SELECT {TRACK_COLS} FROM playlist_items i JOIN tracks t ON t.id = i.track_id
              LEFT JOIN albums a ON a.id = t.album_id WHERE i.playlist_id = ?1 ORDER BY i.pos"
@@ -592,7 +751,7 @@ impl Db {
     }
 }
 
-fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
+pub(crate) fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
     Ok(TrackRow {
         id: r.get(0)?,
         path: r.get(1)?,
@@ -605,6 +764,13 @@ fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
         cover_hash: r.get(8)?,
         track_gain: r.get(9)?,
         album_gain: r.get(10)?,
+        year: r.get(11)?,
+        genre: r.get(12)?,
+        album_artist: r.get(13)?,
+        format: r.get(14)?,
+        sample_rate: r.get(15)?,
+        bit_depth: r.get(16)?,
+        bitrate: r.get(17)?,
     })
 }
 

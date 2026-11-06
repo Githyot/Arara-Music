@@ -33,7 +33,7 @@ Popup {
     padding: 24
     closePolicy: busy ? Popup.NoAutoClose : (Popup.CloseOnEscape | Popup.CloseOnPressOutside)
     Overlay.modal: Rectangle { color: "#4d000000" }
-    background: Rectangle { radius: 18; color: Theme.dark ? "#36363a" : "#ffffff" }
+    background: Rectangle { radius: Theme.dialogRadius; color: Theme.popupBg; border.color: Theme.border; border.width: Theme.fluent || Theme.apple ? 1 : 0 }
 
     component Field: Rectangle {
         property alias input: ti
@@ -64,7 +64,7 @@ Popup {
     contentItem: Column {
         spacing: 12
         Icon { anchors.horizontalCenter: parent.horizontalCenter; name: "server"; size: 48; color: Theme.dimFg }
-        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: "Adicionar servidor"; color: Theme.fg; font.family: Theme.font; font.pointSize: 15; font.weight: Font.Bold }
+        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: "Adicionar servidor"; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.headingSize; font.weight: Theme.headingWeight }
         Text {
             width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
             text: "O catálogo fica guardado neste computador: abre na hora e dá para navegar mesmo offline."

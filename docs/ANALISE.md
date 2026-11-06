@@ -102,10 +102,66 @@ Servidor remoto simulado (`tools/mock_server.py`, API do Jellyfin) com 17.884 fa
 | Remover um servidor deixava as músicas dele na fila | Saem da fila também |
 | Diálogo de arquivo do Qt é estranho ao GNOME | Usa o seletor nativo do GNOME pelo portal (funciona no Flatpak); o do Qt fica só de reserva |
 
+## Feito na versão 0.5
+
+**Correções do teste no Fedora.** A tela "Tocando agora" (capa e botão da barra de progresso cortados, barra lateral sem efeito) foi substituída por um painel do player à direita, como no Nocturne. A lista de músicas ganhou capas por faixa (singles sem álbum usam a capa embutida da própria música), cartões opacos sem sobreposição, barra de rolagem larga que pode ser arrastada e índice A–Z com balão da letra. As letras são baixadas em segundo plano depois da indexação (opção no menu para desligar).
+
+**Novidades.**
+
+- Painel à direita com capa, título, artista, álbum, selo Hi-Res/Sem perdas, tempo decorrido e restante, controles e volume largo; abas Player, Fila e Letra.
+- Reprodução automática na fila: quando a fila acaba, continua com músicas do mesmo artista, do mesmo gênero e favoritas, sem repetir o artista em seguida.
+- Tela de letra estilo karaokê: fundo com o degradê das cores da capa e a capa desfocada, controles à esquerda, letra grande à direita; barra lateral e busca continuam visíveis.
+- Categorias: Gêneros, Anos, Compositores, Pastas e coleções (Favoritas, Adicionadas recentemente, Tocadas recentemente, Mais tocadas).
+- Busca com filtros (`artista:`, `album:`, `genero:`, `compositor:`, `titulo:`, `pasta:`, `ano:2010-2019`, `fav:sim`), botões de escopo, ordenação (relevância, artista, título, álbum, adicionadas, ano, mais tocadas, duração) e "Salvar busca" como playlist inteligente.
+- Várias pastas de música, todas vigiadas.
+- Ideias do lmPlayer, Euphonica e Nuclear: impede a suspensão enquanto toca (portal do GNOME), linha atual da letra publicada no D-Bus (`io.github.Githyot.AraraMusic.Lyrics`) para extensões do painel, cor de destaque tirada da capa (opcional).
+- Ícone novo: azul, nota branca e o rosto da arara desfocado ao fundo.
+
+## Feito na versão 0.5.1
+
+**Travamento ("não está respondendo").** O scanner gravava a reindexação inteira numa única transação, e cada abertura do banco pela interface fazia uma gravação (`INSERT OR IGNORE` da versão do esquema). Enquanto a indexação rodava, qualquer busca, troca de página ou salvamento da fila esperava até 5 s pelo bloqueio. Agora o scanner grava em lotes de até 200 faixas ou 0,4 s, e abrir o banco não grava nada quando o esquema já está atualizado. Num teste com 2.009 faixas reindexando, a pior espera de uma gravação concorrente foi de 0,5 s.
+
+**Letras.** A limpeza de título removia "(Remix)", e um remix recebia a letra da versão original, com os tempos errados. Agora só saem marcações como feat., Remastered e Official Video. Letras sem sincronia são buscadas de novo depois de 1 hora, e uma falha de rede não grava mais a versão sem sincronia como definitiva. Linhas sincronizadas sem tempo por palavra são preenchidas no ritmo da fala, e não esticadas pela pausa instrumental. Há um botão para buscar a letra de novo.
+
+**Estilo Apple Music.** A linha atual cresce e as outras diminuem e esmaecem, e cada linha desliza com um pequeno atraso em cascata. Em duetos ("Nome: ..." ou "v1:/v2:"), o segundo cantor fica à direita, e linhas entre parênteses aparecem como vocal de fundo, menores. A letra sem sincronia fica centralizada e rola junto com a música.
+
+**Interface.** O painel do player fica sempre à direita e a barra de baixo saiu. O painel usa o degradê desfocado das cores da capa, e a capa encolhe ao pausar e volta com um leve efeito de mola ao tocar. As capas são quadrados de cantos arredondados (máscara em shader, porque o `clip` do Qt Quick é sempre reto). As trocas de página e de aba usam esmaecimento. O ícone traz a arara do ReelHouse desfocada atrás da nota.
+
+## Feito na versão 0.6
+
+**Música livre.** Uma página nova busca no Jamendo e no Internet Archive ao mesmo tempo. Do Internet Archive só entram itens com licença Creative Commons ou em domínio público, conferida na busca e de novo nos metadados de cada item. O Jamendo precisa de uma chave grátis ("client id"), que o usuário cola na própria página. Cada resultado mostra a fonte e a licença, toca na hora e pode ser baixado. O download respeita quando o artista não permite baixar no Jamendo.
+
+**Fila de downloads** (`arara-core/src/downloads.rs`): dois workers leem de um canal; se o arquivo já existe, o pedido termina sem baixar; a gravação vai para `.part` e só é renomeada no fim (a pasta vigiada nunca vê arquivo pela metade); depois o arquivo recebe título, artista, álbum e a licença no comentário, e a letra do LRCLIB é salva como `.lrc` ao lado. A interface recebe início, progresso, fim e falha por sinais do Qt, com um anel de progresso que cancela ao clicar. Os arquivos vão para `<pasta de músicas>/Música livre/Artista/Álbum/`.
+
+Testado com um servidor simulado (`tools/mock_freemusic.py`), porque a rede desta máquina bloqueia os dois sites.
+
+## Feito na versão 0.7
+
+- **Temas.** `Theme.qml` virou um conjunto único de tokens (cores, raios, alturas,
+  fontes, movimento) com quatro valores: GNOME (libadwaita), Apple (macOS 26 /
+  Apple Music: barra lateral flutuante, ícones na cor de destaque, play sem fundo,
+  semáforo à esquerda), Android (Material 3: superfícies tonais tiradas do
+  destaque, navegação em pílula, FAB quadrado arredondado, slider com alça em
+  barra) e Windows (Fluent 2: Mica, conteúdo em camada com canto arredondado,
+  barrinha de destaque na seleção, botões de janela largos com fechar vermelho).
+  Controles comuns (`Toggle`, `ThemedSlider`, `WindowControls`, segmentados)
+  desenham cada linguagem a partir dos mesmos tokens.
+- **Coesão GNOME.** Grade de álbuns preenche a largura (sem calha vazia),
+  rodapé da barra lateral separado, títulos, diálogos, menus e toasts usando os
+  mesmos tamanhos e raios.
+- **Barra lateral recolhível.** Biblioteca, Categorias, Coleções, Playlists e
+  Servidores dobram com animação; o estado é salvo. Itens podem ser escondidos.
+- **Preferências** (Ctrl+,): tema, estilo claro/escuro, destaque (tema, sistema,
+  capa ou cor), fundo do player, tamanho das capas e do texto, modo compacto,
+  reduzir animações, ReplayGain por faixa/álbum com pré-amplificação, retomar
+  sessão, tempo restante/duração, letras (busca, painel, duetos, tamanho,
+  ajuste de sincronia), downloads simultâneos, chave do Jamendo, botões da janela.
+
 ## Próximos passos
 
 1. Equalizador, temporizador para dormir e transição sem pausa (gapless).
 2. Guardar os tokens dos servidores no chaveiro do GNOME (Secret Service) em vez do banco.
 3. Cache de áudio para ouvir músicas do servidor offline, e transcodificação opcional para conexões lentas.
 4. Testar com Navidrome e Jellyfin de verdade (aqui foi usado um servidor simulado, porque a rede desta máquina só alcança o próprio computador).
-5. Testar o Flatpak em uma máquina com flatpak-builder (aqui não deu para rodar).
+5. Guardar músicas dos servidores Navidrome/Jellyfin para ouvir offline, usando a mesma fila de downloads.
+6. Testar o Flatpak em uma máquina com flatpak-builder (aqui não deu para rodar).

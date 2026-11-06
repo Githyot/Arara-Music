@@ -2,9 +2,10 @@
 # Needs glibc >= 2.39 and Qt >= 6.4: Fedora 40 or newer, openSUSE Tumbleweed.
 %global debug_package %{nil}
 %global __strip /bin/true
+%{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.4.0
+Version:        0.7.0
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -42,6 +43,41 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Fri Nov 06 2026 Arara Music <noreply@anthropic.com> - 0.7.0-1
+- Temas GNOME, Apple, Android (Material 3) e Windows (Fluent), com
+  claro/escuro, cor de destaque e troca ao vivo
+- Seções da barra lateral recolhíveis; categorias agrupadas
+- Janela de Preferências (Ctrl+,) com opções de aparência, reprodução,
+  letras, biblioteca e janela
+
+* Thu Nov 05 2026 Arara Music <noreply@anthropic.com> - 0.6.2-1
+- Letra sincronizada no painel do player, abaixo dos controles; clique
+  para ampliar. Favoritar e adicionar a playlist na tela de letra grande
+
+* Thu Nov 05 2026 Arara Music <noreply@anthropic.com> - 0.6.1-1
+- O som segue a saída escolhida no GNOME (fone, HDMI, line out), inclusive
+  quando ela muda com a música tocando
+
+* Thu Nov 05 2026 Arara Music <noreply@anthropic.com> - 0.6.0-1
+- Música livre: busca no Jamendo e no Internet Archive (só Creative
+  Commons e domínio público), toca na hora ou baixa para a biblioteca
+  com tags, licença e letra sincronizada (.lrc) ao lado
+
+* Thu Nov 05 2026 Arara Music <noreply@anthropic.com> - 0.5.1-1
+- Corrige travamento durante a indexação (gravação em lotes curtos)
+- Letra no estilo Apple Music: linha atual cresce, cascata suave, duetos
+  dos dois lados, vocais de fundo menores; letra da versão certa (remix)
+- Painel do player sempre à direita com fundo da capa e zoom ao pausar
+- Capas com cantos arredondados, transições suaves, ícone com a arara
+
+* Thu Nov 05 2026 Arara Music <noreply@anthropic.com> - 0.5.0-1
+- Painel do player à direita (Player / Fila / Letra), tela de letra
+  estilo karaokê, reprodução automática, volume largo
+- Rolagem rápida com índice A–Z, gêneros, anos, compositores, pastas,
+  coleções, busca com filtros e playlists inteligentes
+- Várias pastas de música, selo Hi-Res/Sem perdas, letras baixadas em
+  segundo plano, impede a suspensão enquanto toca, ícone novo
+
 * Thu Nov 05 2026 Arara Music <noreply@anthropic.com> - 0.4.0-1
 - Importação de playlists do Apple Music e YouTube Music, menu principal,
   ReplayGain, janela adaptável, servidores Navidrome/Jellyfin, editor de letras

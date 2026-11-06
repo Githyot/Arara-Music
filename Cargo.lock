@@ -87,7 +87,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "arara-app"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "arara-core",
  "cxx",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "arara-cli"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "arara-core",
  "env_logger",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "arara-core"
-version = "0.4.0"
+version = "0.7.0"
 dependencies = [
  "blake3",
  "crossbeam-channel",
@@ -1196,11 +1196,22 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
  "zune-core",
  "zune-jpeg",
+]
+
+[[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
 ]
 
 [[package]]
@@ -1706,6 +1717,12 @@ dependencies = [
  "thiserror 1.0.69",
  "which",
 ]
+
+[[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quick-xml"

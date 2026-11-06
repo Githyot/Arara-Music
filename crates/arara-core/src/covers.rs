@@ -59,3 +59,40 @@ impl CoverCache {
         Ok(hash)
     }
 }
+
+/// A few representative colours of a thumbnail (top-left, top-right,
+/// bottom-left, bottom-right of a 2×2 downscale), as "#rrggbb", for the
+/// gradient behind the lyrics screen. Very dark/light colours are pulled
+/// towards the middle so white text stays readable.
+pub fn palette(path: &std::path::Path) -> Vec<String> {
+    let Ok(img) = image::open(path) else { return vec![] };
+    let small = img.resize_exact(2, 2, image::imageops::FilterType::Triangle).to_rgb8();
+    small
+        .pixels()
+        .map(|p| {
+            let [r, g, b] = p.0.map(|c| c as f32);
+            let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            // keep the hue, clamp the luminance into a band that works under white text
+            let target = l.clamp(55.0, 120.0);
+            let k = if l > 1.0 { target / l } else { 1.0 };
+            let f = |c: f32| ((c * k).clamp(0.0, 255.0)) as u8;
+            let (r, g, b) = if l <= 1.0 { (40, 40, 48) } else { (f(r), f(g), f(b)) };
+            format!("#{r:02x}{g:02x}{b:02x}")
+        })
+        .collect()
+}
+
+/// A small, heavily blurred copy of a thumbnail (written once next to it as
+/// `<name>-blur.jpg`), for soft full-screen backgrounds: scaled up by the GPU
+/// it looks like a big blur at the cost of a 48×48 image.
+pub fn blurred(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let out = path.with_file_name(format!("{}-blur.jpg", path.file_stem()?.to_string_lossy()));
+    if out.exists() {
+        return Some(out);
+    }
+    let img = image::open(path).ok()?;
+    let small = img.resize_exact(48, 48, image::imageops::FilterType::Triangle);
+    let soft = image::imageops::blur(&small.to_rgb8(), 4.0);
+    soft.save(&out).ok()?;
+    Some(out)
+}

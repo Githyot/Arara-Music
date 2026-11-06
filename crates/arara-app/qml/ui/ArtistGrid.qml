@@ -7,7 +7,7 @@ GridView {
     property var artists: []
     signal openArtist(var artist)
 
-    readonly property int tile: 150
+    readonly property int tile: Math.max(120, Theme.tileMin - 10)
     readonly property int columns: Math.max(1, Math.floor((width - 24) / (tile + 32)))
     cellWidth: Math.floor((width - 24) / columns)
     cellHeight: tile + 60

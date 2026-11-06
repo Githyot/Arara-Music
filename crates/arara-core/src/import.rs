@@ -478,6 +478,9 @@ mod tests {
                     track_gain: None,
                     album_gain: None,
                     cover_hash: None,
+                    genre: None,
+                    composer: None,
+                    format: None, sample_rate: None, bit_depth: None, bitrate: None,
                 },
                 0,
             )
