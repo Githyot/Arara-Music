@@ -1,6 +1,7 @@
 //! Arara Music core: library index, scanner, cover cache and lyrics.
 //! Toolkit-agnostic; the Qt/QML front-end lives in `arara-app`.
 
+pub mod analysis;
 pub mod covers;
 pub mod downloads;
 pub mod explicit;

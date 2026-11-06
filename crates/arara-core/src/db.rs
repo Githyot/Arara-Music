@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS playlist_items (
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 
+-- Transition analysis (silence, fade ramps, loudness, tempo), see analysis.rs.
+CREATE TABLE IF NOT EXISTS track_analysis (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    version  INTEGER NOT NULL,
+    mtime    INTEGER NOT NULL,
+    json     TEXT NOT NULL
+);
+
 -- Remote libraries (Subsonic/Navidrome, Jellyfin). Their tracks live in `tracks`
 -- like local ones, with path 'remote://<server id>/<item id>', so search, stars,
 -- playlists, lyrics and the queue work the same and the catalog is cached offline.

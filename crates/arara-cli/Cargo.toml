@@ -9,5 +9,6 @@ name = "arara"
 path = "src/main.rs"
 
 [dependencies]
+serde_json = "1"
 arara-core = { path = "../arara-core" }
 env_logger = "0.11"

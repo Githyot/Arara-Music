@@ -8,6 +8,7 @@
 //!   arara remote sync [id]       mirror remote catalogs into the index
 //!   arara remote list
 //!   arara import <file-or-folder> Apple Music / YouTube Music / CSV / M3U exports
+//!   arara analyze <file>...       transition analysis (silence, fades, loudness, tempo)
 //!
 //! Set ARARA_DB / ARARA_COVERS to override the XDG locations.
 
@@ -34,6 +35,15 @@ fn main() {
     let open_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     match cmd.as_str() {
+        "analyze" => {
+            for f in &rest {
+                let t = Instant::now();
+                match arara_core::analysis::analyze_file(std::path::Path::new(f)) {
+                    Ok(a) => println!("{f}: {} ({:.0} ms)", serde_json::to_string(&a).unwrap(), t.elapsed().as_secs_f64() * 1000.0),
+                    Err(e) => println!("{f}: erro: {e}"),
+                }
+            }
+        }
         "scan" => {
             let covers = CoverCache::new(&paths.covers).unwrap();
             let roots: Vec<PathBuf> = rest.iter().map(PathBuf::from).collect();
