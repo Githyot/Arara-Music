@@ -7,6 +7,7 @@ fn main() {
     CxxQtBuilder::new_qml_module(QmlModule::new("io.github.arara")
         .qml_files([
         "qml/ui/Main.qml",
+        "qml/ui/Decks.qml",
         "qml/ui/HeaderBar.qml",
         "qml/ui/FlatButton.qml",
         "qml/ui/SidebarRow.qml",

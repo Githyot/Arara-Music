@@ -240,6 +240,93 @@ Item {
                             label: (value > 0 ? "+" : "") + value.toFixed(1).replace(".", ",") + " dB"
                             onMoved: (v) => dlg.set("preamp", v)
                         }
+                        SwitchRow {
+                            enabled: dlg.get("replaygain")
+                            title: "Medir volume das músicas sem tags"
+                            subtitle: "Calcula a loudness (EBU R128) de quem não tem ReplayGain, para as transições não darem saltos de volume"
+                            checked: dlg.get("xfloud")
+                            onToggled: dlg.set("xfloud", !checked)
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "play"
+                        title: "Transição entre músicas"
+                        description: "Como uma música passa para a próxima. Métodos inspirados no MPD (MixRamp), Mixxx (Auto DJ), Strawberry e Audacious."
+                        Repeater {
+                            model: [
+                                { v: "off", t: "Corte seco", s: "Uma música termina e a outra começa, como num CD" },
+                                { v: "gapless", t: "Sem intervalo (gapless)", s: "A próxima já fica carregada e entra no instante em que a atual acaba" },
+                                { v: "crossfade", t: "Crossfade", s: "A música atual vai sumindo enquanto a próxima vai crescendo" },
+                                { v: "smart", t: "Mixagem inteligente", s: "Analisa o áudio e sobrepõe só as partes calmas: o fim que já está sumindo e a entrada da próxima" }
+                            ]
+                            RadioRow {
+                                required property var modelData
+                                title: modelData.t; subtitle: modelData.s
+                                checked: dlg.get("xfmode") === modelData.v
+                                onPicked: dlg.set("xfmode", modelData.v)
+                            }
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "play" && (dlg.get("xfmode") === "crossfade" || dlg.get("xfmode") === "smart")
+                        title: "Crossfade"
+                        CurvePreview {
+                            curve: dlg.get("xfcurve")
+                            seconds: dlg.get("xfdur")
+                        }
+                        SliderRow {
+                            title: dlg.get("xfmode") === "smart" ? "Duração máxima" : "Duração"
+                            subtitle: dlg.get("xfmode") === "smart" ? "A mixagem inteligente escolhe o tempo de cada transição até este limite (×1,5)" : "Quanto tempo as duas músicas tocam juntas"
+                            from: 1; to: 12; step: 0.5
+                            value: dlg.get("xfdur")
+                            label: value.toFixed(value % 1 ? 1 : 0).replace(".", ",") + " s"
+                            onMoved: (v) => dlg.set("xfdur", v)
+                        }
+                        ChoiceRow {
+                            title: "Curva"
+                            subtitle: ({ equal: "Potência constante: o volume não afunda no meio", linear: "Volume muda em linha reta (afunda um pouco no meio)",
+                                         scurve: "Começa e termina devagar, troca rápido no meio", exp: "A atual some logo, a próxima entra no fim, estilo DJ" })[dlg.get("xfcurve")] || ""
+                            options: [{ v: "equal", t: "Suave" }, { v: "linear", t: "Linear" }, { v: "scurve", t: "Curva S" }, { v: "exp", t: "DJ" }]
+                            value: dlg.get("xfcurve")
+                            onPicked: (v) => dlg.set("xfcurve", v)
+                        }
+                        SwitchRow {
+                            title: "Crossfade ao trocar de música manualmente"
+                            subtitle: "Ao pular ou escolher outra música, uma transição curta (até 2 s) em vez de um corte"
+                            checked: dlg.get("xfmanual")
+                            onToggled: dlg.set("xfmanual", !checked)
+                        }
+                        SwitchRow {
+                            visible: dlg.get("xfmode") === "smart"
+                            title: "Alinhar na batida (experimental)"
+                            subtitle: "Quando as duas músicas têm andamento parecido, a transição começa numa batida e a próxima entra na primeira batida dela"
+                            checked: dlg.get("xfbeat")
+                            onToggled: dlg.set("xfbeat", !checked)
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "play"
+                        title: "Ajustes das transições"
+                        SwitchRow {
+                            enabled: dlg.get("xfmode") !== "off"
+                            title: "Pular silêncio no começo e no fim"
+                            subtitle: "Ignora os segundos mudos das faixas, para a próxima entrar no tempo certo"
+                            checked: dlg.get("xftrim")
+                            onToggled: dlg.set("xftrim", !checked)
+                        }
+                        SwitchRow {
+                            enabled: dlg.get("xfmode") === "crossfade" || dlg.get("xfmode") === "smart"
+                            title: "Álbuns sem crossfade"
+                            subtitle: "Faixas seguidas do mesmo álbum tocam sem intervalo, sem cortar discos ao vivo e álbuns contínuos"
+                            checked: dlg.get("xfalbum")
+                            onToggled: dlg.set("xfalbum", !checked)
+                        }
+                        SwitchRow {
+                            title: "Fade ao pausar e retomar"
+                            subtitle: "Abaixa o som por um instante em vez de cortar de uma vez"
+                            checked: dlg.get("xfpause")
+                            onToggled: dlg.set("xfpause", !checked)
+                        }
                     }
                     Group {
                         visible: dlg.page === "play"
@@ -497,6 +584,79 @@ Item {
         trailingWidth: tg.width + 12
         Toggle { id: tg; anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter } checked: sr.checked; onToggled: sr.toggled() }
         MouseArea { anchors { fill: parent; rightMargin: tg.width + 20 } cursorShape: Qt.PointingHandCursor; onClicked: sr.toggled() }
+    }
+
+    // AdwActionRow with a radio check (one choice out of a list).
+    component RadioRow: RowBase {
+        id: rr
+        property bool checked: false
+        signal picked()
+        trailingWidth: 34
+        Rectangle {
+            anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
+            width: 20; height: 20; radius: 10
+            color: rr.checked ? Theme.accent : "transparent"
+            border.width: rr.checked ? 0 : 2
+            border.color: Theme.dark ? Qt.rgba(1, 1, 1, 0.3) : Qt.rgba(0, 0, 0, 0.25)
+            Rectangle { visible: rr.checked; anchors.centerIn: parent; width: 8; height: 8; radius: 4; color: Theme.accentInk }
+        }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: rr.picked() }
+    }
+
+    // Drawing of the fade: the current song (grey) going out, the next (accent) coming in.
+    component CurvePreview: RowBase {
+        id: cp
+        property string curve: "equal"
+        property real seconds: 6
+        height: 112
+        trailingWidth: 0
+        Canvas {
+            id: cv
+            anchors { fill: parent; margins: 14; leftMargin: 18; rightMargin: 18 }
+            property string curve: cp.curve
+            property color inColor: Theme.accent
+            property color outColor: Theme.dimFg
+            property color gridColor: Theme.border
+            onCurveChanged: requestPaint()
+            onInColorChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            function g(p) {
+                switch (curve) {
+                case "linear": return [1 - p, p]
+                case "scurve": { var s = p * p * (3 - 2 * p); return [1 - s, s] }
+                case "exp": return [Math.pow(1 - p, 3), Math.pow(p, 0.5) * p]
+                default: return [Math.cos(p * Math.PI / 2), Math.sin(p * Math.PI / 2)]
+                }
+            }
+            onPaint: {
+                var c = getContext("2d"); c.reset()
+                var w = width, h = height - 18
+                c.strokeStyle = gridColor; c.lineWidth = 1
+                c.beginPath(); c.moveTo(0, h + 0.5); c.lineTo(w, h + 0.5); c.stroke()
+                for (var k = 0; k < 2; k++) {
+                    c.beginPath()
+                    c.strokeStyle = k ? inColor : outColor
+                    c.lineWidth = 3; c.lineCap = "round"
+                    for (var i = 0; i <= 80; i++) {
+                        var p = i / 80, y = h - g(p)[k] * (h - 4)
+                        if (i === 0) c.moveTo(p * w, y); else c.lineTo(p * w, y)
+                    }
+                    c.stroke()
+                }
+            }
+        }
+        Text {
+            anchors { left: parent.left; bottom: parent.bottom; leftMargin: 18; bottomMargin: 8 }
+            text: "música atual"; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 2
+        }
+        Text {
+            anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 8 }
+            text: cp.seconds.toFixed(cp.seconds % 1 ? 1 : 0).replace(".", ",") + " s"; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 2
+        }
+        Text {
+            anchors { right: parent.right; bottom: parent.bottom; rightMargin: 18; bottomMargin: 8 }
+            text: "próxima"; color: Theme.accent; font.family: Theme.font; font.pointSize: Theme.fontSize - 2; font.weight: Font.DemiBold
+        }
     }
 
     component ChoiceRow: RowBase {

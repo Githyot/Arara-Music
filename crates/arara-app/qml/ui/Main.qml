@@ -35,6 +35,9 @@ Window {
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
         autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
         explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true,
+        // transitions between songs (see Decks.qml and the `xf` object below)
+        xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
+        xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
         hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close"
     })
     property var prefs: prefDefaults
@@ -88,11 +91,17 @@ Window {
     // Volume chosen by the user; ReplayGain scales the real output under it.
     property real userVolume: 1.0
     readonly property bool replayGain: prefs.replaygain
-    readonly property real gainFactor: {
-        var t = player.current
+    readonly property real gainFactor: trackGain(player.current)
+    // ReplayGain from tags; without tags, the loudness measured for transitions
+    // (EBU R128, aiming at -18 LUFS like ReplayGain 2).
+    function trackGain(t) {
         if (!replayGain || !t) return 1.0
         var has = function (x) { return x !== undefined && x !== null }
         var g = prefs.rgmode === "album" ? (has(t.albumGain) ? t.albumGain : t.gain) : (has(t.gain) ? t.gain : t.albumGain)
+        if (!has(g) && prefs.xfloud) {
+            var an = xf.analyses[t.id]
+            if (an && an.lufs !== null && an.lufs !== undefined) g = -18 - Number(an.lufs)
+        }
         if (has(g)) g = Number(g) + Number(prefs.preamp)
         if (g === undefined || g === null) return 1.0
         return Math.min(1.0, Math.pow(10, Number(g) / 20))
@@ -129,7 +138,7 @@ Window {
     Connections {
         target: Prefs
         function onRequestRate(r) { win.setRate(r) }
-        function onPlaybackRateChanged() { media.applyRate() }
+        function onPlaybackRateChanged() { decks.applyRate() }
     }
     function setRate(r) {
         r = Prefs.clampRate(r)
@@ -182,13 +191,14 @@ Window {
             var e = library.explicitOf(Number(trackId))
             if (e !== (Prefs.explicitOverride[Number(trackId)] !== undefined ? Prefs.explicitOverride[Number(trackId)] : -1)) Prefs.setExplicit(trackId, e)
         }
+        onAnalysisReady: (trackId, json) => xf.store(Number(trackId), json)
         onMediaCommand: (cmd, arg) => {
             var us = Number(arg)
             switch (cmd) {
-            case "play": if (player.current) media.play(); break
-            case "pause": media.pause(); break
+            case "play": player.resume(); break
+            case "pause": player.pause(); break
             case "playpause": playerBar.toggle(); break
-            case "stop": media.stop(); break
+            case "stop": decks.stopAll(); break
             case "next": player.next(); break
             case "previous": player.prev(); break
             case "seek": player.seekTo(media.position + us / 1000); break
@@ -211,24 +221,51 @@ Window {
         property string repeat: "off"
         property bool restoring: false
 
+        property int failures: 0
         function playList(list, i) { queue = list.slice(); index = i; shuffle = false; start(true) }
-        function start(autoplay) {
-            if (!current) { media.stop(); return }
-            media.source = current.url
-            if (autoplay) { media.play(); library.recordPlay(current.id) }
+        // `mixed`: the decks already started this song (automatic transition).
+        function start(autoplay, mixed) {
+            if (!current) { decks.stopAll(); return }
+            if (!mixed) {
+                var from = xf.startFor(current)
+                // A song changed by hand while one is playing: short crossfade, if enabled.
+                if (autoplay && xf.manualMs() > 0 && media.playbackState === MediaPlayer.PlayingState && !restoring)
+                    decks.crossfade(current, from, xf.manualMs(), true)
+                else decks.load(current, from, autoplay)
+            }
+            if (autoplay) library.recordPlay(current.id)
+            xf.prepare()
             win.lyrics = { kind: "none" }
             win.loadingLyrics = true
             library.requestLyrics(current.id)
             save()
         }
         function next() {
-            if (repeat === "one" && media.mediaStatus === MediaPlayer.EndOfMedia) { media.position = 0; media.play(); return }
+            if (repeat === "one" && media.mediaStatus === MediaPlayer.EndOfMedia) { decks.load(current, 0, true); return }
             if (index + 1 < queue.length) { index++; start(true) }
             else if (repeat === "all" && queue.length > 0) { index = 0; start(true) }
             else if (win.autoplay && current && extendAutoplay()) { index++; start(true) }
         }
-        function prev() { if (media.position > 3000 || index <= 0) media.position = 0; else { index--; start(true) } }
+        function prev() { if (media.position > 3000 || index <= 0) seekTo(0); else { index--; start(true) } }
         function jump(i) { index = i; start(true) }
+        // The song that would play after this one, without changing anything
+        // (null at the end of the queue, or when repeating one song).
+        function peekNext() {
+            if (repeat === "one" || !current) return null
+            if (index + 1 < queue.length) return queue[index + 1]
+            if (repeat === "all" && queue.length > 0) return queue[0]
+            return null
+        }
+        // Automatic transition: move to the next song; the decks already play it.
+        function advanceMixed() {
+            if (index + 1 < queue.length) index++
+            else if (repeat === "all" && queue.length > 0) index = 0
+            else return
+            start(true, true)
+        }
+        function togglePlay() { if (media.playbackState === MediaPlayer.PlayingState) pause(); else resume() }
+        function pause() { decks.pause(win.prefs.xfpause ? 220 : 0) }
+        function resume() { if (current) decks.resume(win.prefs.xfpause ? 300 : 0) }
         // Autoplay: when the queue runs out, append tracks like the last ones.
         function extendAutoplay() {
             var recent = queue.slice(-200).map(function (t) { return t.id })
@@ -238,7 +275,7 @@ Window {
             toast.show("Reprodução automática: " + more.length + " músicas na fila")
             return true
         }
-        function seekTo(ms) { media.position = Math.max(0, ms); library.mprisPosition(media.position, true) }
+        function seekTo(ms) { decks.finish(); media.position = Math.max(0, ms); library.mprisPosition(media.position, true) }
 
         function playNext(t) {
             if (!current) { playList([t], 0); return }
@@ -265,7 +302,7 @@ Window {
         function dropWhere(pred) {
             var cur = current, q = queue.filter(function (t) { return !pred(t) })
             if (q.length === queue.length) return
-            if (cur && pred(cur)) { media.stop(); queue = q; index = q.length ? 0 : -1; if (current) start(false) }
+            if (cur && pred(cur)) { decks.stopAll(); queue = q; index = q.length ? 0 : -1; if (current) start(false) }
             else { queue = q; index = q.indexOf(cur) }
             save()
         }
@@ -301,56 +338,156 @@ Window {
         property real pendingSeek: -1
     }
 
-    MediaPlayer {
-        id: media
+    // Two players so songs can fade into each other; `media` is the one playing now.
+    Decks {
+        id: decks
         // Qt picks the default output only once, at startup. Follow the output chosen in
         // GNOME (headset, HDMI, line out…) whenever it changes, even mid-song.
-        // Speed 0.25×–2×. Lyrics follow media.position, which is in song time,
-        // so they stay in sync at any speed.
-        // Set imperatively, not bound: the GStreamer backend (older Qt) drops the
-        // speed when a new song loads while the property keeps the old value, so
-        // the speed is applied again once every new song starts moving.
-        onPlaybackRateChanged: library.mprisRate(playbackRate)
-        property bool rateDirty: true
-        onSourceChanged: rateDirty = true
-        // Once the new song is really running (position moves), the pipeline accepts the speed.
-        onPositionChanged: if (rateDirty && position > 0 && playbackState === MediaPlayer.PlayingState) { rateDirty = false; applyRate() }
-        function applyRate() {
-            var r = Prefs.playbackRate
-            if (Math.abs(r - 1) > 0.001 && Math.abs(playbackRate - r) < 0.001) playbackRate = 1
-            playbackRate = r
-        }
-        // Qt 6.10+ (FFmpeg backend) can keep the pitch when the speed changes;
-        // older Qt with GStreamer does it on its own (scaletempo).
-        Component.onCompleted: {
-            if (media.pitchCompensation !== undefined) { media.pitchCompensation = true; Prefs.pitchKept = media.pitchCompensation === true }
-            applyRate(); library.mprisRate(playbackRate)
-        }
-        audioOutput: AudioOutput { id: audio; volume: win.userVolume * win.gainFactor; device: sysAudio.defaultAudioOutput }
+        device: sysAudio.defaultAudioOutput
+        volume: win.userVolume
+        gainFor: function (t) { return win.trackGain(t) }
+        curve: win.prefs.xfcurve
+        onRateApplied: (r) => library.mprisRate(r)
+        Component.onCompleted: library.mprisRate(Prefs.playbackRate)
         // A missing file or unreachable server: say so and move on, but don't
         // spin through a whole queue of broken tracks.
-        property int failures: 0
-        onErrorOccurred: (error, message) => {
+        onFailed: (message) => {
             if (!player.current) return
             toast.show("Não foi possível tocar “" + player.current.title + "”")
-            if (++failures < 3) player.next()
+            if (++player.failures < 3) player.next()
         }
-        onMediaStatusChanged: {
-            if (mediaStatus === MediaPlayer.EndOfMedia) player.next()
-            if (mediaStatus === MediaPlayer.LoadedMedia) applyPendingSeek()
+        onEndOfMedia: player.next()
+        onActiveLoaded: applyPendingSeek()
+        onActiveStateChanged: {
+            if (media.playbackState === MediaPlayer.PlayingState) player.failures = 0
+            applyPendingSeek(); mpris.push()
+            library.setPlaying(media.playbackState === MediaPlayer.PlayingState)
         }
         // GStreamer only accepts a seek once the stream is seekable (or playing).
         function applyPendingSeek() {
-            if (player.pendingSeek > 0 && seekable) { position = player.pendingSeek; player.pendingSeek = -1 }
-        }
-        onSeekableChanged: applyPendingSeek()
-        onPlaybackStateChanged: {
-            if (playbackState === MediaPlayer.PlayingState) failures = 0
-            applyPendingSeek(); mpris.push()
-            library.setPlaying(playbackState === MediaPlayer.PlayingState)
+            if (player.pendingSeek > 0 && media.seekable) { media.position = player.pendingSeek; player.pendingSeek = -1 }
         }
     }
+    readonly property MediaPlayer media: decks.active
+    Connections { target: decks.active; function onSeekableChanged() { decks.applyPendingSeek() } }
 
+    // ---------- transitions ----------
+    // Plans when and how the next song comes in. Methods, from open-source players:
+    //  gapless (no gap, next song preloaded), crossfade with a chosen curve (Strawberry,
+    //  Audacious), silence trimming (Audacious, Mixxx "Skip Silence"), smart mix that
+    //  overlaps only the quiet fade-out/fade-in parts (MPD MixRamp), beat alignment
+    //  (Mixxx Auto DJ, simplified: no time-stretch) and loudness matching (ReplayGain 2).
+    QtObject {
+        id: xf
+        property var analyses: ({})        // track id → analysis (or null when unavailable)
+        property var requested: ({})
+        readonly property string mode: win.prefs.xfmode
+        function store(id, json) {
+            var a = {}; for (var k in analyses) a[k] = analyses[k]
+            try { a[id] = JSON.parse(json) } catch (e) { a[id] = null }
+            analyses = a
+        }
+        function want(t) {
+            if (!t || requested[t.id] || t.remote) return
+            requested[t.id] = true
+            library.requestAnalysis(t.id)
+        }
+        // Analyse the current song and the next one (only these two: decoding costs CPU).
+        function prepare() {
+            if (mode === "off" && !(win.prefs.replaygain && win.prefs.xfloud)) return
+            want(player.current)
+            want(player.peekNext())
+        }
+        function trimOn() { return win.prefs.xftrim && mode !== "off" }
+        // Where a song starts when played (skips leading silence).
+        function startFor(t) {
+            var a = t ? analyses[t.id] : null
+            return trimOn() && a && a.intro_ms > 300 ? a.intro_ms : 0
+        }
+        function manualMs() {
+            if (!win.prefs.xfmanual || mode === "off" || mode === "gapless") return 0
+            return Math.min(2000, win.prefs.xfdur * 1000)
+        }
+        function sameAlbum(a, b) {
+            // Consecutive songs of one album (not a shuffle that happened to land there):
+            // albums that flow into the next track (live, concept albums) stay intact.
+            return win.prefs.xfalbum && !player.shuffle && a.albumId !== undefined && a.albumId !== null
+                && a.albumId >= 0 && a.albumId === b.albumId
+        }
+        function beatAt(a, t, after) {
+            var p = 60000 / a.bpm, k = Math.floor((t - a.beat_ms) / p)
+            var x = a.beat_ms + k * p
+            return after && x < t ? x + p : x
+        }
+        // → { at: position in the current song to start the next, start: where the next
+        //     starts, dur: fade length (0 = gapless switch), cut: stop the old one at once }
+        function plan(a, b) {
+            var A = analyses[a.id], B = analyses[b.id]
+            var durA = A ? A.duration_ms : (media.duration > 0 ? media.duration : a.duration)
+            var durB = B ? B.duration_ms : b.duration
+            if (!durA) return null
+            var trim = trimOn()
+            var endA = trim && A ? A.outro_ms : durA
+            var startB = trim && B && B.intro_ms > 300 ? B.intro_ms : 0
+            var lead = 60   // GStreamer needs a moment to start the preloaded song
+            if (mode === "gapless" || sameAlbum(a, b)) {
+                // Albums that flow into the next track (live, concept albums) stay intact.
+                if (sameAlbum(a, b)) { endA = durA; startB = 0 }
+                return { at: endA - lead, start: startB, dur: 0, cut: endA < durA - 100 }
+            }
+            var user = win.prefs.xfdur * 1000
+            var cap = Math.max(1000, Math.min(durA, durB || durA) / 3)
+            var d = Math.min(user, cap), at = endA - d
+            if (mode === "smart" && A && B) {
+                // MixRamp: the next song reaches full level just as this one drops below it.
+                var head = Math.max(0, B.ramp_in_ms - startB)
+                at = A.ramp_out_ms - head
+                var maxD = Math.min(Math.max(user * 1.5, 3000), cap)
+                if (endA - at > maxD) at = endA - maxD
+                if (endA - at < 1000) at = endA - 1000
+                // Beat alignment when the tempos match (or are double/half), within 4%.
+                if (win.prefs.xfbeat && A.bpm && B.bpm && A.beat_ms !== null && B.beat_ms !== null) {
+                    var r = A.bpm / B.bpm
+                    var close = [0.5, 1, 2].some(function (m) { return Math.abs(r / m - 1) < 0.04 })
+                    if (close) {
+                        at = beatAt(A, at, false)
+                        startB = Math.max(startB, B.beat_ms)
+                    }
+                }
+                d = endA - at
+            }
+            return { at: at, start: startB, dur: d, cut: true }
+        }
+        property var current: null   // plan for current → next
+        property bool armed: false
+        function tick() {
+            var a = player.current, b = player.peekNext()
+            if (!a) return
+            if (!b && win.autoplay && player.index + 1 >= player.queue.length) {
+                // Autoplay: fill the queue early enough to mix into its first song.
+                var left = (media.duration - media.position) / Math.max(0.25, Prefs.playbackRate)
+                if (media.duration > 0 && left < (win.prefs.xfdur * 1000 * 1.5 + 10000) && player.extendAutoplay()) b = player.peekNext()
+            }
+            if (!b || decks.transitioning) return
+            want(a); want(b)
+            var p = plan(a, b)
+            if (!p) return
+            var rate = Math.max(0.25, Prefs.playbackRate)
+            var wall = (p.at - media.position) / rate
+            if (wall < 12000) decks.preload(b, p.start)
+            if (media.position >= p.at && media.position > 500) {
+                decks.crossfade(b, p.start, p.dur, p.cut)
+                player.advanceMixed()
+            }
+        }
+    }
+    Timer {
+        // Faster near the transition point so gapless switches land within a few ms.
+        interval: xf.mode !== "off" && media.duration > 0 && media.duration - media.position < 3000 ? 15 : 200
+        repeat: true
+        running: xf.mode !== "off" && media.playbackState === MediaPlayer.PlayingState
+        onTriggered: xf.tick()
+    }
     // Current lyric line → D-Bus (for desktop widgets / floating lyrics).
     readonly property int lyricIndex: {
         var ls = win.lyrics && win.lyrics.kind === "synced" ? win.lyrics.lines : []
@@ -977,7 +1114,7 @@ Window {
             shuffle: player.shuffle
             repeat: player.repeat
             volume: win.userVolume
-            onToggle: playing ? media.pause() : (player.current ? media.play() : null)
+            onToggle: player.togglePlay()
             onNext: player.next()
             onPrev: player.prev()
             onSeek: (ms) => player.seekTo(ms)

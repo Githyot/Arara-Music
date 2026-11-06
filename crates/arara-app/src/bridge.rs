@@ -161,6 +161,13 @@ pub mod qobject {
         #[cxx_name = "requestLyrics"]
         fn request_lyrics(self: Pin<&mut Library>, track_id: i64);
 
+        /// Transition analysis (silence, fades, loudness, tempo) on a worker
+        /// thread, cached in the database; answers with `analysisReady`
+        /// ("null" for remote tracks or undecodable files).
+        #[qinvokable]
+        #[cxx_name = "requestAnalysis"]
+        fn request_analysis(self: Pin<&mut Library>, track_id: i64);
+
         /// Forget the stored lyrics (wrong version, unsynced) and look them up again.
         #[qinvokable]
         #[cxx_name = "refetchLyrics"]
@@ -334,6 +341,9 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "lyricsText"]
         fn lyrics_text(self: &Library, track_id: i64) -> QString;
+        #[qsignal]
+        #[cxx_name = "analysisReady"]
+        fn analysis_ready(self: Pin<&mut Library>, track_id: i64, json: QString);
 
         /// Search Jamendo + Internet Archive (open licences only); answers with `freeResults`.
         #[qinvokable]
@@ -1207,6 +1217,19 @@ impl qobject::Library {
             Some((_, None, Some(plain))) => qs(&plain),
             _ => qs(""),
         }
+    }
+
+    pub fn request_analysis(self: Pin<&mut Self>, track_id: i64) {
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        // One analysis at a time: decoding is CPU-heavy and they come in pairs.
+        static BUSY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        std::thread::spawn(move || {
+            let _g = BUSY.lock();
+            let res = Db::open(&db_path).ok().and_then(|db| arara_core::analysis::cached_or_analyze(&db, track_id));
+            let s = res.map(|a| serde_json::to_string(&a).unwrap_or_else(|_| "null".into())).unwrap_or_else(|| "null".into());
+            let _ = qt.queue(move |o| o.analysis_ready(track_id, qs(&s)));
+        });
     }
 
     pub fn request_lyrics(self: Pin<&mut Self>, track_id: i64) {
