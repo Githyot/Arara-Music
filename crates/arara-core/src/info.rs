@@ -278,12 +278,36 @@ fn s(v: &Value) -> Option<String> {
     v.as_str().map(str::to_owned).filter(|x| !x.is_empty())
 }
 
-/// Best search hit whose name matches ours (MusicBrainz scores fuzzy matches high too).
+/// Search hit whose name matches ours. Only a real name match counts:
+/// MusicBrainz gives fuzzy matches a score of 100 too, and taking "the top
+/// hit" is how another band's record ends up on an album page.
 fn pick<'a>(hits: &'a [Value], field: &str, want: &str) -> Option<&'a Value> {
     let w = norm(want);
-    hits.iter()
-        .find(|h| norm(h[field].as_str().unwrap_or("")) == w)
-        .or_else(|| hits.first().filter(|h| h["score"].as_i64().unwrap_or(0) >= 95))
+    if w.is_empty() {
+        return None;
+    }
+    hits.iter().find(|h| {
+        norm(h[field].as_str().unwrap_or("")) == w
+            || h["aliases"].as_array().is_some_and(|al| al.iter().any(|x| norm(x["name"].as_str().unwrap_or("")) == w))
+    })
+}
+
+/// Does a release/recording hit credit our artist? Compares the main name
+/// ("A feat. B" → "A") with each credited artist.
+fn credits_artist(hit: &Value, artist: &str) -> bool {
+    let want = norm(&split_artists(artist).0);
+    if want.is_empty() {
+        return false;
+    }
+    let Some(credits) = hit["artist-credit"].as_array() else { return false };
+    let joined: String = credits
+        .iter()
+        .map(|c| format!("{}{}", c["name"].as_str().unwrap_or(""), c["joinphrase"].as_str().unwrap_or("")))
+        .collect();
+    norm(&joined) == want
+        || credits.iter().any(|c| {
+            [c["name"].as_str(), c["artist"]["name"].as_str()].into_iter().flatten().any(|n| norm(n) == want)
+        })
 }
 
 /// Wikipedia summary (pt first, then en) for a Wikidata id: text, page link, photo URL.
@@ -383,12 +407,12 @@ pub fn fetch_album(title: &str, artist: &str, mbid: Option<&str>) -> Option<Valu
             let q = format!("release:{} AND artist:{}", phrase(title), phrase(artist));
             let r = mb(&a, &format!("release/?query={}&limit=8", enc(&q)))?;
             let hits = r["releases"].as_array()?;
-            // Prefer an official release with the exact title.
+            // Same title *and* same artist, official releases first. No
+            // "best score" fallback: a near miss is another record.
             let w = norm(title);
             hits.iter()
-                .filter(|h| norm(h["title"].as_str().unwrap_or("")) == w)
+                .filter(|h| !w.is_empty() && norm(h["title"].as_str().unwrap_or("")) == w && credits_artist(h, artist))
                 .max_by_key(|h| (h["status"] == "Official") as i64 * 1000 + h["score"].as_i64().unwrap_or(0))
-                .or_else(|| hits.first().filter(|h| h["score"].as_i64().unwrap_or(0) >= 95))
                 .and_then(|h| s(&h["id"]))?
         }
     };
@@ -507,13 +531,15 @@ pub fn fetch_recording(title: &str, artist: &str, album: Option<&str>, duration_
             }
             let hits = r["recordings"].as_array()?;
             let w = norm(title);
+            let off = |h: &Value| {
+                let len = h["length"].as_i64().unwrap_or(0);
+                if duration_ms > 0 && len > 0 { (len - duration_ms).abs() } else { 600_000 }
+            };
             hits.iter()
-                .filter(|h| norm(h["title"].as_str().unwrap_or("")) == w)
-                .min_by_key(|h| {
-                    let len = h["length"].as_i64().unwrap_or(0);
-                    if duration_ms > 0 && len > 0 { (len - duration_ms).abs() } else { 600_000 }
-                })
-                .or_else(|| hits.first().filter(|h| h["score"].as_i64().unwrap_or(0) >= 95))
+                .filter(|h| !w.is_empty() && norm(h["title"].as_str().unwrap_or("")) == w && credits_artist(h, artist))
+                // a known length more than 30 s away is a different recording
+                .filter(|h| off(h) <= 30_000 || off(h) == 600_000)
+                .min_by_key(|h| off(h))
                 .and_then(|h| s(&h["id"]))?
         }
     };
@@ -643,5 +669,24 @@ mod tests {
     fn escapes_search_phrases() {
         assert_eq!(phrase("AC/DC: Live!"), "\"AC\\/DC\\: Live\\!\"");
         assert_eq!(enc("a b/ç"), "a%20b%2F%C3%A7");
+    }
+}
+
+#[cfg(test)]
+mod strict_match_tests {
+    use super::*;
+
+    #[test]
+    fn release_must_match_title_and_artist() {
+        let hit = |title: &str, artist: &str| json!({ "title": title, "score": 100, "artist-credit": [{ "name": artist, "artist": { "name": artist } }] });
+        assert!(credits_artist(&hit("La Familia 013", "Charlie Brown Jr."), "Charlie Brown Jr."));
+        assert!(credits_artist(&hit("x", "Charlie Brown Jr."), "Charlie Brown Jr. feat. Negra Li"));
+        assert!(!credits_artist(&hit("Room on Fire", "The Strokes"), "Charlie Brown Jr."));
+        assert!(!credits_artist(&json!({ "title": "x" }), "Charlie Brown Jr."));
+        // a top-scored hit with another name is no longer taken
+        let hits = vec![json!({ "name": "Charlie Brown", "score": 100 })];
+        assert!(pick(&hits, "name", "Charlie Brown Jr.").is_none());
+        let hits = vec![json!({ "name": "CBJR", "score": 90, "aliases": [{ "name": "Charlie Brown Jr." }] })];
+        assert!(pick(&hits, "name", "Charlie Brown Jr.").is_some());
     }
 }

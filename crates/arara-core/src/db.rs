@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS albums (
     year       INTEGER,
     cover_hash TEXT,              -- blake3 of the source image; thumbnail lives on disk
     added_at   INTEGER NOT NULL,
+    cover_user INTEGER,           -- 1: picked by the user, never replaced automatically
     UNIQUE(title, artist_id)
 );
 CREATE TABLE IF NOT EXISTS tracks (
@@ -52,7 +53,9 @@ CREATE TABLE IF NOT EXISTS tracks (
     bitrate     INTEGER,            -- kbit/s
     explicit        INTEGER,        -- advisory from the tag/server: 1 explicit, 0 clean, NULL unknown
     explicit_lyrics INTEGER,        -- guess from the lyrics (see explicit.rs)
-    explicit_user   INTEGER         -- the user's choice, overrides both
+    explicit_user   INTEGER,        -- the user's choice, overrides both
+    art_hash        TEXT,           -- embedded front cover of this file (local files)
+    folder_art      TEXT            -- cover.jpg/folder.jpg next to this file
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id, disc_no, track_no);
 
@@ -136,6 +139,10 @@ pub struct NewTrack<'a> {
     pub bitrate: Option<u32>,
     /// Parental advisory from the tag or server (None = unknown).
     pub explicit: Option<bool>,
+    /// Embedded front cover of a local file and the folder art next to it.
+    /// Album covers are voted from these after a scan (see `pick_album_covers`).
+    pub art_hash: Option<&'a str>,
+    pub folder_art: Option<&'a str>,
 }
 
 /// Insert/update one track (plus its artist, album and search entry) on an open
@@ -161,7 +168,10 @@ pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
     };
     let mut cover_written = false;
     if let (Some(aid), Some(hash)) = (album_id, p.cover_hash) {
-        c.execute("UPDATE albums SET cover_hash=?1 WHERE id=?2", params![hash, aid])?;
+        c.execute(
+            "UPDATE albums SET cover_hash=?1 WHERE id=?2 AND COALESCE(cover_user, 0) = 0",
+            params![hash, aid],
+        )?;
         cover_written = true;
     }
     // A track without an album keeps its own picture (e.g. downloaded singles).
@@ -186,8 +196,8 @@ pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
     c.execute(
         "INSERT INTO tracks(path, mtime, size, title, artist, album_id, track_no, disc_no, year, duration_ms,
                             track_gain, album_gain, cover_hash, genre, composer, added_at,
-                            format, sample_rate, bit_depth, bitrate, explicit)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
+                            format, sample_rate, bit_depth, bitrate, explicit, art_hash, folder_art)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)
          ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, title=excluded.title,
            artist=excluded.artist, album_id=excluded.album_id, track_no=excluded.track_no,
            disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,
@@ -196,12 +206,12 @@ pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
            genre=excluded.genre, composer=excluded.composer,
            added_at=COALESCE(tracks.added_at, excluded.added_at),
            format=excluded.format, sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth, bitrate=excluded.bitrate,
-           explicit=excluded.explicit",
+           explicit=excluded.explicit, art_hash=excluded.art_hash, folder_art=excluded.folder_art",
         params![
             p.path, p.mtime, p.size, p.title, p.artist, album_id, p.track_no, p.disc_no,
             p.year, p.duration_ms, p.track_gain, p.album_gain, track_cover, p.genre, p.composer,
             if p.mtime > 0 && !p.path.starts_with(crate::remote::PREFIX) { p.mtime } else { now },
-            p.format, p.sample_rate, p.bit_depth, p.bitrate, p.explicit
+            p.format, p.sample_rate, p.bit_depth, p.bitrate, p.explicit, p.art_hash, p.folder_art
         ],
     )?;
     let tid: i64 = c.query_row("SELECT id FROM tracks WHERE path=?1", [p.path], |r| r.get(0))?;
@@ -334,6 +344,88 @@ pub struct AlbumRow {
     pub track_count: i64,
 }
 
+/// Choose every local album's cover by vote over its tracks.
+///
+/// Each track votes for its embedded front cover and for the cover.jpg in its
+/// folder. Folder art only counts when that folder holds this album alone: a
+/// cover.jpg in a mixed "Downloads" folder belongs to some other record. So a
+/// few files with a wrong picture (a bad tag from a downloader, a stray image)
+/// can't take over an album whose other tracks agree. Albums the user gave a
+/// cover by hand, and albums that only exist on a server, are left alone.
+/// Returns how many albums changed.
+pub fn pick_album_covers(c: &Connection) -> Result<usize> {
+    use std::collections::{HashMap, HashSet};
+    struct Row {
+        album: i64,
+        dir: String,
+        art: Option<String>,
+        folder: Option<String>,
+    }
+    let rows: Vec<Row> = {
+        let mut st = c.prepare(
+            "SELECT album_id, path, art_hash, folder_art FROM tracks
+             WHERE album_id IS NOT NULL AND path NOT LIKE 'remote://%'",
+        )?;
+        let it = st.query_map([], |r| {
+            let path: String = r.get(1)?;
+            let dir = Path::new(&path).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+            Ok(Row { album: r.get(0)?, dir, art: r.get(2)?, folder: r.get(3)? })
+        })?;
+        it.flatten().collect()
+    };
+    let mut albums_in_dir: HashMap<&str, HashSet<i64>> = HashMap::new();
+    for r in &rows {
+        albums_in_dir.entry(r.dir.as_str()).or_default().insert(r.album);
+    }
+    // album -> image -> (votes, came from an album-only folder)
+    let mut votes: HashMap<i64, HashMap<&str, (u32, bool)>> = HashMap::new();
+    let mut shared: HashMap<i64, HashMap<&str, u32>> = HashMap::new();
+    for r in &rows {
+        let only_this = albums_in_dir.get(r.dir.as_str()).map_or(true, |s| s.len() == 1);
+        let v = votes.entry(r.album).or_default();
+        if let Some(f) = r.folder.as_deref() {
+            if only_this {
+                let e = v.entry(f).or_default();
+                e.0 += 1;
+                e.1 = true;
+            } else {
+                *shared.entry(r.album).or_default().entry(f).or_default() += 1;
+            }
+        }
+        if let Some(a) = r.art.as_deref() {
+            // A file whose picture is the folder art votes once, not twice.
+            if !(only_this && r.folder.as_deref() == Some(a)) {
+                v.entry(a).or_default().0 += 1;
+            }
+        }
+    }
+    let mut pick: HashMap<i64, &str> = HashMap::new();
+    for (album, v) in &votes {
+        // Most votes wins; a tie goes to folder art, then to the smaller hash
+        // so the result never depends on the order files were read.
+        if let Some((h, _)) = v.iter().max_by(|a, b| {
+            (a.1 .0, a.1 .1).cmp(&(b.1 .0, b.1 .1)).then_with(|| b.0.cmp(a.0))
+        }) {
+            pick.insert(*album, h);
+        }
+    }
+    for (album, v) in &shared {
+        if !pick.contains_key(album) {
+            if let Some((h, _)) = v.iter().max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0))) {
+                pick.insert(*album, h);
+            }
+        }
+    }
+    let mut st = c.prepare(
+        "UPDATE albums SET cover_hash=?1 WHERE id=?2 AND COALESCE(cover_user, 0) = 0 AND cover_hash IS NOT ?1",
+    )?;
+    let mut changed = 0;
+    for (album, hash) in pick {
+        changed += st.execute(params![hash, album])?;
+    }
+    Ok(changed)
+}
+
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
@@ -417,6 +509,30 @@ impl Db {
                 conn.execute("UPDATE tracks SET explicit_lyrics=?1 WHERE id=?2", params![e, id])?;
             }
         }
+        // 0.7.11: album art chosen by vote over every track (embedded front
+        // cover + folder art) instead of "first file parsed wins". Local files
+        // are re-read once so each track records its own art.
+        let has_art: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('tracks') WHERE name='art_hash'")?
+            .exists([])?;
+        if !has_art {
+            conn.execute_batch(
+                "ALTER TABLE tracks ADD COLUMN art_hash TEXT;
+                 ALTER TABLE tracks ADD COLUMN folder_art TEXT;
+                 UPDATE tracks SET mtime = 0 WHERE path NOT LIKE 'remote://%';",
+            )?;
+        }
+        let has_user_cover: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('albums') WHERE name='cover_user'")?
+            .exists([])?;
+        if !has_user_cover {
+            // Online lookups now insist on title + artist; drop answers cached
+            // by the looser matching so they are fetched again.
+            conn.execute_batch(
+                "ALTER TABLE albums ADD COLUMN cover_user INTEGER;
+                 DELETE FROM kv WHERE k LIKE 'info:%';",
+            )?;
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre COLLATE NOCASE);
              CREATE INDEX IF NOT EXISTS tracks_added ON tracks(added_at);",
@@ -437,6 +553,37 @@ impl Db {
             && q("SELECT 1 FROM sqlite_master WHERE type='index' AND name='tracks_added'")
             // 0.7.6: databases upgraded from older versions never got this table.
             && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_analysis'")
+            && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='art_hash'")
+            && q("SELECT 1 FROM pragma_table_info('albums') WHERE name='cover_user'")
+    }
+
+    /// Forget a hand-picked cover and mark the album's local files for the next
+    /// scan, which votes its cover again.
+    pub fn reread_album_cover(&self, album_id: i64) -> Result<()> {
+        let _w = WRITER.lock().unwrap_or_else(|e| e.into_inner());
+        self.conn.execute("UPDATE albums SET cover_user = NULL WHERE id = ?1", [album_id])?;
+        self.conn.execute(
+            "UPDATE tracks SET mtime = 0 WHERE album_id = ?1 AND path NOT LIKE 'remote://%'",
+            [album_id],
+        )?;
+        Ok(())
+    }
+
+    /// Mark every local file for the next scan (hand-picked covers stay).
+    pub fn reread_all_covers(&self) -> Result<()> {
+        let _w = WRITER.lock().unwrap_or_else(|e| e.into_inner());
+        self.conn.execute("UPDATE tracks SET mtime = 0 WHERE path NOT LIKE 'remote://%'", [])?;
+        Ok(())
+    }
+
+    /// An image the user chose for an album; scans never replace it.
+    pub fn set_user_cover(&self, album_id: i64, hash: &str) -> Result<()> {
+        let _w = WRITER.lock().unwrap_or_else(|e| e.into_inner());
+        self.conn.execute(
+            "UPDATE albums SET cover_hash = ?1, cover_user = 1 WHERE id = ?2",
+            params![hash, album_id],
+        )?;
+        Ok(())
     }
 
     pub fn artist_id(&self, name: &str) -> Result<i64> {
@@ -838,6 +985,36 @@ pub(crate) fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_database_gets_cover_columns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("db.sqlite");
+        {
+            // A database from before 0.7.11 (and before every other migration).
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT NOT NULL COLLATE NOCASE, artist_id INTEGER,
+                                      year INTEGER, cover_hash TEXT, added_at INTEGER NOT NULL, UNIQUE(title, artist_id));
+                 CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, mtime INTEGER NOT NULL,
+                                      size INTEGER NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL, album_id INTEGER,
+                                      track_no INTEGER, disc_no INTEGER, year INTEGER, duration_ms INTEGER NOT NULL DEFAULT 0,
+                                      track_gain REAL, album_gain REAL, starred INTEGER NOT NULL DEFAULT 0,
+                                      play_count INTEGER NOT NULL DEFAULT 0, last_played INTEGER);
+                 CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT);
+                 INSERT INTO tracks(path, mtime, size, title, artist) VALUES ('/m/a.flac', 5, 1, 't', 'a'),
+                                                                             ('remote://1/x', 0, 9, 't', 'a');
+                 INSERT INTO kv(k, v) VALUES ('info:album:x', '{}'), ('pref:theme', 'gnome');",
+            ).unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        let mtimes: Vec<(String, i64)> = db.conn.prepare("SELECT path, mtime FROM tracks ORDER BY path").unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect();
+        assert_eq!(mtimes, vec![("/m/a.flac".into(), 0), ("remote://1/x".into(), 0)]);
+        assert!(db.get_kv("info:album:x").unwrap().is_none());
+        assert_eq!(db.get_kv("pref:theme").unwrap().as_deref(), Some("gnome"));
+        assert!(Db::is_current(&db.conn));
+    }
 
     #[test]
     fn old_database_gets_analysis_table() {

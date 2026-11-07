@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import AraraStyle
 
 // Album details: big art + title on the left (stacks on narrow widths),
@@ -20,6 +21,8 @@ Flickable {
     signal openLink(string url)
     signal openFolder(string url)
     signal refreshAbout()
+    signal refreshCover(int albumId)
+    signal chooseCover(int albumId)
 
     clip: true
     contentHeight: body.height + 48
@@ -42,6 +45,11 @@ Flickable {
                 x: wide ? 0 : (parent.width - width) / 2
                 decode: 260
                 source: page.album ? page.album.coverBig : ""
+                // Right-click on the art: the same cover menu as the "⋯" button.
+                MouseArea {
+                    anchors.fill: parent; acceptedButtons: Qt.RightButton
+                    onClicked: (m) => coverMenu.openAt(parent, m.x, m.y)
+                }
             }
             Text {
                 width: parent.width; wrapMode: Text.Wrap
@@ -71,6 +79,7 @@ Flickable {
                         page.play(t, 0)
                     }
                 }
+                FlatButton { id: moreBtn; icon: "more"; tip: "Capa do álbum"; onClicked: coverMenu.openAt(moreBtn, 0, moreBtn.height + 4) }
             }
         }
 
@@ -119,6 +128,45 @@ Flickable {
                         onActivated: page.play(page.tracks, index)
                         onMenuRequested: (t, x, y) => page.menuRequested(t, x, y)
                         onStarToggled: (t, s) => page.starToggled(t, s)
+                    }
+                }
+            }
+        }
+    }
+
+    // Cover actions. The cover is voted from the album's own files; these fix
+    // the rare album where that still picks the wrong picture.
+    Popup {
+        id: coverMenu
+        width: 260
+        padding: 6
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        function openAt(item, px, py) {
+            var p = item.mapToItem(Overlay.overlay, px, py)
+            parent = Overlay.overlay
+            x = Math.min(p.x, Overlay.overlay.width - width - 8); y = p.y
+            open()
+        }
+        background: Rectangle { radius: Theme.popupRadius; color: Theme.popupBg; border.color: Theme.border }
+        contentItem: Column {
+            Repeater {
+                model: [
+                    { k: "refresh", t: "Procurar a capa de novo" },
+                    { k: "choose", t: "Escolher imagem da capa…" }
+                ]
+                Rectangle {
+                    required property var modelData
+                    width: coverMenu.width - 12; height: 34; radius: Theme.material ? 0 : Theme.radius
+                    color: cm.containsMouse ? Theme.hover : "transparent"
+                    Text { anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter } text: modelData.t; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize }
+                    MouseArea {
+                        id: cm; anchors.fill: parent; hoverEnabled: true
+                        onClicked: {
+                            coverMenu.close()
+                            if (!page.album) return
+                            if (modelData.k === "refresh") page.refreshCover(page.album.id)
+                            else page.chooseCover(page.album.id)
+                        }
                     }
                 }
             }

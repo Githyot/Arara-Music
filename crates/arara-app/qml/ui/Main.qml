@@ -75,6 +75,10 @@ Window {
     // Blurred cover + sampled colours of the current track, for backgrounds.
     property string backdrop: ""
     property var coverColors: []
+    function useAlbumCover(id, path) {
+        library.setAlbumCover(id, path)
+        toast.show("Capa do álbum trocada")
+    }
     function refreshCoverLook() {
         var c = player.current ? player.current.cover : ""
         backdrop = c ? library.coverBlur(c) : ""
@@ -186,10 +190,12 @@ Window {
         onPathPicked: (purpose, path) => {
             if (purpose === "library") library.changeLibraryDir(path)
             else if (purpose === "addlibrary") { library.addLibraryDir(path); foldersDialog.dirs = JSON.parse(library.libraryDirsJson()) }
+            else if (purpose.indexOf("cover:") === 0) win.useAlbumCover(Number(purpose.slice(6)), path)
             else importDialog.pickedPath(path)
         }
         onPickerUnavailable: (purpose, directory) => {
             if (purpose === "library" || purpose === "addlibrary") { folderDialog.adding = purpose === "addlibrary"; folderDialog.open() }
+            else if (purpose.indexOf("cover:") === 0) { coverDialog.albumId = Number(purpose.slice(6)); coverDialog.open() }
             else importDialog.fallback(directory)
         }
         onServerAdded: (ok, message) => { addServer.finished(ok, message); if (ok) toast.show(message) }
@@ -654,6 +660,10 @@ Window {
         function openPlaylist(p) { var st = state(); playlist = p; go("playlist", st) }
         function openServer(s) { var st = state(); server = s; go("server", st) }
         function refresh() {
+            if (page === "album" && album) {
+                var al = albumGrid.albums.find(function (x) { return x.id === album.id })
+                if (al) album = al
+            }
             if (page === "server" && server) {
                 var all = JSON.parse(library.serversJson())
                 var sv = all.find(function (x) { return x.id === server.id })
@@ -1028,6 +1038,8 @@ Window {
                     onOpenLink: (url) => Qt.openUrlExternally(url)
                     onOpenFolder: (url) => Qt.openUrlExternally(url)
                     onRefreshAbout: win.loadAlbumAbout(true)
+                    onRefreshCover: (id) => { library.refreshAlbumCover(id); toast.show("Procurando a capa nos arquivos do álbum…") }
+                    onChooseCover: (id) => library.pickPath("cover:" + id, "Escolha a imagem da capa", false)
                 }
                 InfoPage {
                     id: infoPage
@@ -1356,10 +1368,19 @@ Window {
         setFn: win.setPref
         onChooseFolders: { foldersDialog.dirs = JSON.parse(library.libraryDirsJson()); foldersDialog.open() }
         onRescan: { library.changeLibraryDir(library.libraryDir); toast.show("Reindexando a biblioteca…") }
+        onRebuildCovers: { library.rebuildCovers(); toast.show("Refazendo as capas dos álbuns…") }
         onResetAll: prompt.confirm("Restaurar as preferências?", "Tema, cores, reprodução e letras voltam ao padrão.", "Restaurar", function () { win.resetPrefs() })
         onClearHistory: prompt.confirm("Apagar o histórico de escuta?", "Todas as retrospectivas voltam a zero. Não dá para desfazer.", "Apagar", function () {
             listen.restart(); library.clearListens(); recapPage.reload(); toast.show("Histórico de escuta apagado")
         })
+    }
+    // Fallback when the portal's file chooser is missing.
+    FileDialog {
+        id: coverDialog
+        property int albumId: -1
+        title: "Escolha a imagem da capa"
+        nameFilters: ["Imagens (*.jpg *.jpeg *.png *.webp)", "Todos os arquivos (*)"]
+        onAccepted: win.useAlbumCover(albumId, decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
     }
     FolderDialog {
         id: folderDialog

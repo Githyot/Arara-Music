@@ -735,7 +735,7 @@ pub fn sync(db: &mut Db, covers: &CoverCache, server: &Server, mut progress: imp
                 genre: t.genre.as_deref(),
                 composer: None,
                 format: None, sample_rate: None, bit_depth: None, bitrate: None,
-                explicit: t.explicit,
+                explicit: t.explicit, art_hash: None, folder_art: None,
             },
             now,
         )

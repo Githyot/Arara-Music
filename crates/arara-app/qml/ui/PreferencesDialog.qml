@@ -12,6 +12,7 @@ Item {
     property string page: "look"
     signal chooseFolders()
     signal rescan()
+    signal rebuildCovers()
     signal resetAll()
     signal clearHistory()
     function set(k, v) { if (setFn) setFn(k, v) }
@@ -437,6 +438,12 @@ Item {
                             subtitle: "Lê de novo as tags e capas de todas as pastas"
                             button: "Reindexar agora"
                             onClicked: dlg.rescan()
+                        }
+                        ButtonRow {
+                            title: "Capas dos álbuns"
+                            subtitle: "Escolhe de novo a capa de cada álbum pela imagem que a maioria das faixas e a pasta do álbum usam. As capas que você escolheu à mão não mudam"
+                            button: "Refazer capas"
+                            onClicked: dlg.rebuildCovers()
                         }
                     }
                     Group {

@@ -56,6 +56,23 @@ pub mod qobject {
         #[cxx_name = "albumsJson"]
         fn albums_json(self: &Library) -> QString;
 
+        /// Forget a hand-picked cover and re-read this album's files, so its
+        /// cover is chosen again from the embedded art and folder images.
+        #[qinvokable]
+        #[cxx_name = "refreshAlbumCover"]
+        fn refresh_album_cover(self: Pin<&mut Library>, album_id: i64);
+
+        /// Use an image file (path or file:// URL) as this album's cover.
+        #[qinvokable]
+        #[cxx_name = "setAlbumCover"]
+        fn set_album_cover(self: Pin<&mut Library>, album_id: i64, image: &QString);
+
+        /// Re-read every local file and choose every album cover again
+        /// (hand-picked covers are kept).
+        #[qinvokable]
+        #[cxx_name = "rebuildCovers"]
+        fn rebuild_covers(self: Pin<&mut Library>);
+
         #[qinvokable]
         #[cxx_name = "albumTracksJson"]
         fn album_tracks_json(self: &Library, album_id: i64) -> QString;
@@ -935,6 +952,57 @@ impl qobject::Library {
         qs(&serde_json::to_string(&v).unwrap())
     }
 
+    /// Runs `work` on a fresh connection off the UI thread (it may wait on the
+    /// scanner's write lock), then `after` back on the UI thread.
+    fn db_job(
+        &self,
+        work: impl FnOnce(&Db) -> arara_core::Result<()> + Send + 'static,
+        after: impl FnOnce(Pin<&mut qobject::Library>) + Send + 'static,
+    ) {
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            let ok = Db::open(&db_path).and_then(|db| work(&db));
+            match ok {
+                Ok(()) => {
+                    let _ = qt.queue(after);
+                }
+                Err(e) => log::warn!("cover job failed: {e}"),
+            }
+        });
+    }
+
+    pub fn refresh_album_cover(self: Pin<&mut Self>, album_id: i64) {
+        self.db_job(
+            move |db| {
+                db.reread_album_cover(album_id)
+            },
+            |o| o.rescan(),
+        );
+    }
+
+    pub fn set_album_cover(self: Pin<&mut Self>, album_id: i64, image: &QString) {
+        let path = remote::url_to_path(&image.to_string());
+        let covers_dir = self.covers_dir.clone();
+        self.db_job(
+            move |db| {
+                let bytes = std::fs::read(&path)?;
+                let hash = CoverCache::new(&covers_dir)?.store(&bytes)?;
+                db.set_user_cover(album_id, &hash)
+            },
+            |o| o.library_changed(),
+        );
+    }
+
+    pub fn rebuild_covers(self: Pin<&mut Self>) {
+        self.db_job(
+            |db| {
+                db.reread_all_covers()
+            },
+            |o| o.rescan(),
+        );
+    }
+
     pub fn albums_json(&self) -> QString {
         let Some(db) = &self.db else { return qs("[]") };
         let v: Vec<_> = db.albums().unwrap_or_default().iter().map(|a| self.album_value(a)).collect();
@@ -1737,7 +1805,14 @@ impl qobject::Library {
         let (purpose, title) = (purpose.to_string(), title.to_string());
         std::thread::spawn(move || {
             const EXPORTS: &[&str] = &["*.xml", "*.csv", "*.json", "*.m3u", "*.m3u8", "*.xspf"];
-            let filters: &[(&str, &[&str])] = if directory { &[] } else { &[("Exportações de playlists", EXPORTS), ("Todos os arquivos", &["*"])] };
+            const IMAGES: &[&str] = &["*.jpg", "*.jpeg", "*.png", "*.webp", "*.JPG", "*.JPEG", "*.PNG"];
+            let filters: &[(&str, &[&str])] = if directory {
+                &[]
+            } else if purpose.starts_with("cover:") {
+                &[("Imagens", IMAGES), ("Todos os arquivos", &["*"])]
+            } else {
+                &[("Exportações de playlists", EXPORTS), ("Todos os arquivos", &["*"])]
+            };
             let res = desktop::portal_pick(&title, directory, filters);
             let _ = qt.queue(move |mut o| match res {
                 Ok(Some(p)) => o.as_mut().path_picked(qs(&purpose), qs(&p)),
