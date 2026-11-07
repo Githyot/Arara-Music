@@ -155,7 +155,7 @@ Rectangle {
                         ink: "#2b2b2b"
                     }
                 }
-                // Artist and album: click either to go to the artist's or the album's page.
+                // Artist and album are links: the artist opens the artist page, the album the album page.
                 Text {
                     id: artistText
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
@@ -167,7 +167,7 @@ Rectangle {
                         id: artistMa
                         anchors.centerIn: parent; width: Math.min(parent.width, parent.contentWidth + 8); height: parent.height
                         hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: goMenu.openBelow(artistText)
+                        onClicked: panel.goArtist(panel.track)
                     }
                 }
                 Text {
@@ -181,7 +181,7 @@ Rectangle {
                         id: albumMa
                         anchors.centerIn: parent; width: Math.min(parent.width, parent.contentWidth + 8); height: parent.height
                         hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: goMenu.openBelow(albumText)
+                        onClicked: panel.goAlbum(panel.track)
                     }
                 }
                 // Quality badge (Hi-Res / Sem perdas) + format detail
@@ -321,40 +321,6 @@ Rectangle {
             onJump: (i) => panel.jump(i)
             onRemoveAt: (i) => panel.removeAt(i)
             onMoveItem: (f, t) => panel.moveItem(f, t)
-        }
-    }
-
-    // Small popover: go to the artist or to the album of the current track.
-    Popup {
-        id: goMenu
-        parent: panel.Window.contentItem
-        width: 220; padding: 6
-        modal: false; focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        function openBelow(item) {
-            var p = item.mapToItem(null, item.width / 2, item.height)
-            x = Math.max(8, Math.min(p.x - width / 2, (parent ? parent.width : 9999) - width - 8)); y = p.y + 4
-            open()
-        }
-        background: Rectangle {
-            radius: Theme.popupRadius; color: Theme.popupBg; border.color: Theme.border
-            Rectangle { z: -1; anchors.fill: parent; anchors.margins: -2; radius: parent.radius + 2; color: "#000000"; opacity: 0.08 }
-        }
-        contentItem: Column {
-            Repeater {
-                model: [{ k: "artist", i: "artist", t: "Ver página do artista" }, { k: "album", i: "albums", t: "Ver página do álbum" }]
-                Rectangle {
-                    required property var modelData
-                    width: goMenu.width - 12; height: 36; radius: Theme.material ? 0 : Theme.radius
-                    color: gm.containsMouse ? Theme.hover : "transparent"
-                    Icon { id: gi; anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter } name: modelData.i; size: 16 }
-                    Text { anchors { left: gi.right; leftMargin: 10; verticalCenter: parent.verticalCenter } text: modelData.t; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize }
-                    MouseArea {
-                        id: gm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: { goMenu.close(); if (modelData.k === "artist") panel.goArtist(panel.track); else panel.goAlbum(panel.track) }
-                    }
-                }
-            }
         }
     }
 }
