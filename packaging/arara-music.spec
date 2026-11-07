@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.9
+Version:        0.7.10
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,14 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.10-1
+- Biblioteca em HD externo: o app não trava mais quando o disco está
+  bloqueado, desconectado ou acabou de ser desbloqueado (as pastas são
+  vigiadas fora da interface)
+- Com o disco bloqueado, as músicas continuam na biblioteca em vez de sumir
+- Aviso no topo com o botão "Abrir no Arquivos" para desbloquear; ao
+  desbloquear, o Arara percebe sozinho e atualiza a biblioteca
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.9-1
 - Corrige o app que ficava rodando sem abrir a janela: a janela aparece antes
   de varrer a biblioteca, falar com o GNOME (MPRIS, tema, inibir suspensão) e

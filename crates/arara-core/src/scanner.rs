@@ -258,6 +258,21 @@ fn folder_cover(dir: &Path) -> Option<PathBuf> {
     None
 }
 
+/// "root" with a trailing separator, so /music doesn't match /music2.
+fn root_prefix(root: &Path) -> String {
+    let mut s = root.to_string_lossy().into_owned();
+    if !s.ends_with(std::path::MAIN_SEPARATOR) {
+        s.push(std::path::MAIN_SEPARATOR);
+    }
+    s
+}
+
+/// A music folder that can be read right now and isn't an empty mount point
+/// (a locked or unplugged external disk leaves either nothing or an empty dir).
+pub fn root_available(root: &Path) -> bool {
+    std::fs::read_dir(root).map(|mut it| it.next().is_some()).unwrap_or(false)
+}
+
 pub fn scan(
     db: &mut Db,
     covers: &CoverCache,
@@ -271,18 +286,33 @@ pub fn scan(
 
     // 1. Walk (cheap: stat only).
     let mut found: Vec<(PathBuf, i64, i64)> = Vec::new();
+    // Roots we could not read completely (locked or unplugged external disk,
+    // unmounted mount point, I/O errors): their tracks are kept as they are.
+    let mut unreliable: Vec<String> = Vec::new();
     for root in roots {
+        let before = found.len();
+        let mut errors = false;
         for e in WalkDir::new(root)
             .follow_links(true)
             .into_iter()
             .filter_entry(|e| e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.'))
-            .flatten()
         {
+            let e = match e {
+                Ok(e) => e,
+                Err(_) => {
+                    errors = true;
+                    continue;
+                }
+            };
             if e.file_type().is_file() && is_audio(e.path()) {
                 if let Some((m, s)) = file_sig(e.path()) {
                     found.push((e.into_path(), m, s));
                 }
             }
+        }
+        if errors || found.len() == before {
+            log::info!("{} unavailable or empty: keeping its tracks", root.display());
+            unreliable.push(root_prefix(root));
         }
     }
     stats.seen = found.len();
@@ -377,7 +407,9 @@ pub fn scan(
 
         // 3. Remove local tracks whose files are gone (remote tracks belong to their server's sync).
         stats.removed = crate::db::delete_tracks_where(&txn, |path| {
-            !path.starts_with(crate::remote::PREFIX) && !seen_paths.contains(path)
+            !path.starts_with(crate::remote::PREFIX)
+                && !seen_paths.contains(path)
+                && !unreliable.iter().any(|r| path.starts_with(r.as_str()))
         })?;
         txn.commit()?;
         Ok(())
@@ -386,4 +418,60 @@ pub fn scan(
     stats.elapsed_ms = t0.elapsed().as_millis();
     on_event(ScanEvent::Finished(stats.clone()));
     Ok(stats)
+}
+
+#[cfg(test)]
+mod unavailable_tests {
+    use super::*;
+
+    fn wav(path: &Path) {
+        let samples = 8000u32;
+        let mut b = Vec::new();
+        b.extend_from_slice(b"RIFF");
+        b.extend_from_slice(&(36 + samples * 2).to_le_bytes());
+        b.extend_from_slice(b"WAVEfmt ");
+        b.extend_from_slice(&16u32.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&8000u32.to_le_bytes());
+        b.extend_from_slice(&16000u32.to_le_bytes());
+        b.extend_from_slice(&2u16.to_le_bytes());
+        b.extend_from_slice(&16u16.to_le_bytes());
+        b.extend_from_slice(b"data");
+        b.extend_from_slice(&(samples * 2).to_le_bytes());
+        b.resize(b.len() + samples as usize * 2, 0);
+        std::fs::write(path, b).unwrap();
+    }
+
+    #[test]
+    fn locked_disk_keeps_tracks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let music = tmp.path().join("hd");
+        std::fs::create_dir_all(music.join("Album")).unwrap();
+        wav(&music.join("Album/a.wav"));
+        wav(&music.join("Album/b.wav"));
+        let mut db = Db::open(&tmp.path().join("db.sqlite")).unwrap();
+        let covers = CoverCache::new(tmp.path().join("covers")).unwrap();
+        let roots = vec![music.clone()];
+        scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(db.counts().unwrap().0, 2);
+
+        // Disk locked: the mount point is empty, then gone entirely.
+        std::fs::rename(&music, tmp.path().join("away")).unwrap();
+        std::fs::create_dir_all(&music).unwrap();
+        let s = scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(s.removed, 0);
+        std::fs::remove_dir(&music).unwrap();
+        let s = scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(s.removed, 0);
+        assert_eq!(db.counts().unwrap().0, 2);
+        assert!(!root_available(&music));
+
+        // Back, minus one song: that one goes.
+        std::fs::rename(tmp.path().join("away"), &music).unwrap();
+        std::fs::remove_file(music.join("Album/b.wav")).unwrap();
+        assert!(root_available(&music));
+        let s = scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(s.removed, 1);
+    }
 }

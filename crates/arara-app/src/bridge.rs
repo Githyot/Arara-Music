@@ -25,6 +25,8 @@ pub mod qobject {
         #[qproperty(QString, accent)]
         #[qproperty(bool, syncing)]
         #[qproperty(QString, lyrics_progress, cxx_name = "lyricsProgress")]
+        /// JSON list of music folders that can't be read now (locked/unplugged disk).
+        #[qproperty(QString, missing_dirs, cxx_name = "missingDirs")]
         type Library = super::LibraryRust;
 
         /// Opens the cached index (instant), starts a background rescan,
@@ -41,6 +43,10 @@ pub mod qobject {
         /// The UI thread is alive (freeze reporter); `what` names the step it starts.
         #[qinvokable]
         fn heartbeat(self: &Library, what: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "openMissingDir"]
+        fn open_missing_dir(self: &Library, dir: &QString);
 
         #[qinvokable]
         #[cxx_name = "startScan"]
@@ -441,6 +447,7 @@ pub struct LibraryRust {
     accent: QString,
     syncing: bool,
     lyrics_progress: QString,
+    missing_dirs: QString,
     prefetching: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: remote::Resolver,
     sync_queue: Vec<i64>,
@@ -448,7 +455,7 @@ pub struct LibraryRust {
     covers_dir: PathBuf,
     db: Option<Db>,
     rescan_pending: bool,
-    watcher: Option<LibraryWatcher>,
+    watch_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     mpris: Option<Mpris>,
     inhibit: Option<desktop::Inhibitor>,
     downloads: Option<downloads::DownloadManager>,
@@ -480,7 +487,8 @@ impl Default for LibraryRust {
             covers_dir: p.covers,
             db: None,
             rescan_pending: false,
-            watcher: None,
+            watch_gen: Default::default(),
+            missing_dirs: QString::from("[]"),
             mpris: None,
             inhibit: None,
             downloads: None,
@@ -602,16 +610,105 @@ impl qobject::Library {
         self.as_mut().watch_dirs(&dirs);
     }
 
-    fn watch_dirs(mut self: Pin<&mut Self>, dirs: &[String]) {
+    /// Watches the music folders from a helper thread. Nothing here touches the
+    /// disk on the UI thread: an external drive that is spinning up, locked or
+    /// half-mounted can block any file access for a long time. The thread also
+    /// notices when a folder goes away or comes back (disk unlocked in Files)
+    /// and rescans then.
+    fn watch_dirs(self: Pin<&mut Self>, dirs: &[String]) {
+        use std::sync::atomic::Ordering;
         let qt = self.qt_thread();
         let roots: Vec<PathBuf> = dirs.iter().map(PathBuf::from).collect();
-        let w = LibraryWatcher::new(&roots, std::time::Duration::from_secs(2), move || {
-            let _ = qt.queue(|o| o.rescan());
+        let gen_ref = self.watch_gen.clone();
+        let gen = gen_ref.fetch_add(1, Ordering::SeqCst) + 1;
+        let db_path = self.db_path.clone();
+        let _ = std::thread::Builder::new().name("arara-folders".into()).spawn(move || {
+            // Folders that have songs in the index: if one of them is empty now,
+            // it's an unmounted disk, not a new empty folder.
+            let known: Vec<bool> = {
+                let db = Db::open(&db_path).ok();
+                roots
+                    .iter()
+                    .map(|r| {
+                        let mut prefix = r.to_string_lossy().into_owned();
+                        if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
+                            prefix.push(std::path::MAIN_SEPARATOR);
+                        }
+                        db.as_ref()
+                            .and_then(|d| {
+                                d.conn
+                                    .query_row(
+                                        "SELECT 1 FROM tracks WHERE substr(path, 1, length(?1)) = ?1 LIMIT 1",
+                                        [&prefix],
+                                        |_| Ok(()),
+                                    )
+                                    .ok()
+                            })
+                            .is_some()
+                    })
+                    .collect()
+            };
+            let mut prev: Option<Vec<bool>> = None;
+            let mut watcher: Option<LibraryWatcher> = None;
+            while gen_ref.load(Ordering::SeqCst) == gen {
+                let now: Vec<bool> = roots
+                    .iter()
+                    .zip(&known)
+                    .map(|(r, k)| scanner::root_available(r) || (!k && r.is_dir()))
+                    .collect();
+                if prev.as_ref() != Some(&now) {
+                    let came_back = prev.as_ref().map(|p| p.iter().zip(&now).any(|(a, b)| !a && *b)).unwrap_or(false);
+                    let ok: Vec<PathBuf> = roots.iter().zip(&now).filter(|(_, a)| **a).map(|(r, _)| r.clone()).collect();
+                    let missing: Vec<String> =
+                        roots.iter().zip(&now).filter(|(_, a)| !**a).map(|(r, _)| r.to_string_lossy().into_owned()).collect();
+                    watcher = None;
+                    let q = qt.clone();
+                    match LibraryWatcher::new(&ok, std::time::Duration::from_secs(2), move || {
+                        let _ = q.queue(|o| o.rescan());
+                    }) {
+                        Ok(w) => watcher = Some(w),
+                        Err(e) => log::warn!("folder watching unavailable: {e}"),
+                    }
+                    let json = serde_json::to_string(&missing).unwrap();
+                    let _ = qt.queue(move |mut o| {
+                        o.as_mut().set_missing_dirs(qs(&json));
+                        if came_back {
+                            o.as_mut().rescan();
+                        }
+                    });
+                    prev = Some(now);
+                }
+                for _ in 0..16 {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    if gen_ref.load(Ordering::SeqCst) != gen {
+                        break;
+                    }
+                }
+            }
+            drop(watcher);
         });
-        match w {
-            Ok(w) => self.as_mut().rust_mut().watcher = Some(w),
-            Err(e) => log::warn!("folder watching unavailable: {e}"),
-        }
+    }
+
+    /// Opens the file manager where the missing folder should be, so the user
+    /// can unlock or mount the disk there (GNOME asks for the password).
+    pub fn open_missing_dir(&self, dir: &QString) {
+        let dir = PathBuf::from(dir.to_string());
+        std::thread::spawn(move || {
+            let mut p = dir.as_path();
+            while !p.is_dir() {
+                match p.parent() {
+                    Some(q) => p = q,
+                    None => break,
+                }
+            }
+            let target = p.to_path_buf();
+            #[cfg(not(windows))]
+            let _ = std::process::Command::new("gio").arg("open").arg(&target).spawn().or_else(|_| {
+                std::process::Command::new("xdg-open").arg(&target).spawn()
+            });
+            #[cfg(windows)]
+            let _ = std::process::Command::new("explorer").arg(&target).spawn();
+        });
     }
 
     fn rescan(mut self: Pin<&mut Self>) {

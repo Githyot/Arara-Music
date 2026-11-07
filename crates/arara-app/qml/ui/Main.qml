@@ -895,12 +895,39 @@ Window {
             }
             Timer { id: searchTimer; interval: 120; onTriggered: songs.search(search.text) }
 
+            // A music folder can't be read (external disk locked or unplugged).
+            // Its songs stay in the library; the app rescans when it comes back.
+            Rectangle {
+                id: diskBanner
+                readonly property var missing: JSON.parse(library.missingDirs || "[]")
+                readonly property bool shown: missing.length > 0
+                anchors { left: parent.left; right: parent.right; top: header.bottom }
+                height: shown ? Math.max(52, bannerText.implicitHeight + 20) : 0
+                visible: shown
+                color: Qt.rgba(Theme.destructive.r, Theme.destructive.g, Theme.destructive.b, Theme.dark ? 0.16 : 0.10)
+                Icon { id: bannerIcon; anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter } name: "warning"; size: 16; color: Theme.destructive }
+                Text {
+                    id: bannerText
+                    anchors { left: bannerIcon.right; leftMargin: 10; right: bannerButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                    wrapMode: Text.Wrap
+                    text: diskBanner.missing.length === 0 ? ""
+                        : "Não consigo ler " + diskBanner.missing[0] + (diskBanner.missing.length > 1 ? " e mais " + (diskBanner.missing.length - 1) : "")
+                          + ". Se for um disco externo, conecte ou desbloqueie no Arquivos; as músicas voltam sozinhas."
+                    color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1
+                }
+                FlatButton {
+                    id: bannerButton
+                    anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                    text: "Abrir no Arquivos"; color: Theme.hover
+                    onClicked: library.openMissingDir(diskBanner.missing[0])
+                }
+            }
             readonly property bool infoBarShown: win.infoBarOpen && nav.page === "artist" && !win.lyricsMode && (!infoBarOverlay || win.infoBarForced)
             readonly property bool infoBarOverlay: content.width < 700
             InfoBar {
                 id: infoBar
                 z: 6
-                anchors { right: parent.right; top: header.bottom; bottom: parent.bottom }
+                anchors { right: parent.right; top: diskBanner.bottom; bottom: parent.bottom }
                 width: content.infoBarOverlay ? content.width : Math.min(360, Math.max(300, content.width * 0.4))
                 visible: content.infoBarShown
                 playingId: player.current ? player.current.id : -1
@@ -913,7 +940,7 @@ Window {
             }
             Item {
                 id: stack
-                anchors { left: parent.left; right: parent.right; top: header.bottom; bottom: parent.bottom
+                anchors { left: parent.left; right: parent.right; top: diskBanner.bottom; bottom: parent.bottom
                           rightMargin: content.infoBarShown && !content.infoBarOverlay ? infoBar.width : 0 }
                 // Each page change fades the new page in and lifts it a little.
                 transform: Translate { id: stackLift }
