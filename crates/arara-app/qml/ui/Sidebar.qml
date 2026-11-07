@@ -98,8 +98,7 @@ Item {
                     { p: "added", i: "added", t: "Recém-adicionadas" },
                     { p: "recent", i: "recent", t: "Tocadas recentemente" },
                     { p: "mostplayed", i: "plays", t: "Mais tocadas" },
-                    { p: "recap", i: "recap", t: "Retrospectiva" },
-                    { p: "free", i: "download", t: "Música livre" }
+                    { p: "recap", i: "recap", t: "Retrospectiva" }
                 ])
             }
             Section {
