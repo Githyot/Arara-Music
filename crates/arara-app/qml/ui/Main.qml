@@ -54,6 +54,7 @@ Window {
         // 0.6 stored the cover accent as its own switch
         if (library.setting("accent", "") === "" && library.setting("coveraccent", "0") === "1") p.accent = "cover"
         prefs = p
+        win.infoBarOpen = library.setting("infobar", "1") === "1"
     }
     function setPref(k, v) {
         var p = Object.assign({}, prefs); p[k] = v; prefs = p
@@ -686,15 +687,32 @@ Window {
         if (ar) { win.lyricsMode = false; nav.openArtist(ar) } else toast.show("Artista não encontrado na biblioteca")
     }
     // ---------- info pages ----------
-    property bool infoBarOpen: false
+    // Artist "Sobre" bar: docked by default when there is room; on narrow
+    // windows only after the ⓘ button (it would cover the page).
+    property bool infoBarOpen: true
+    property bool infoBarForced: false
     property string infoKey: ""          // "<kind>:<id>" the bar currently shows
     function loadTrackInfo(t) {
         infoPage.info = JSON.parse(library.trackInfoJson(t.id))
         infoPage.online = null; infoPage.loading = true
         library.requestOnlineInfo("track", t.id, false)
     }
-    function infoSubject() { return nav.page === "artist" ? nav.artist : nav.page === "album" ? nav.album : null }
+    function infoSubject() { return nav.page === "artist" ? nav.artist : null }
+    property string albumInfoKey: ""
+    // Album page: the "Sobre o álbum" block lives in the page itself.
+    function loadAlbumAbout(force) {
+        if (nav.page !== "album" || !nav.album) return
+        var key = "album:" + nav.album.id
+        if (key === win.albumInfoKey && !force) return
+        win.albumInfoKey = key
+        albumPage.aboutInfo = JSON.parse(library.albumInfoJson(nav.album.id))
+        albumPage.aboutOnline = null
+        albumPage.aboutOff = !win.prefs.onlineinfo
+        albumPage.aboutLoading = win.prefs.onlineinfo
+        library.requestOnlineInfo("album", nav.album.id, !!force)
+    }
     function loadInfoBar(force) {
+        loadAlbumAbout(force)
         var subj = infoSubject()
         if (!win.infoBarOpen || !subj) return
         var kind = nav.page, key = kind + ":" + subj.id
@@ -707,14 +725,20 @@ Window {
         infoBar.loading = win.prefs.onlineinfo
         library.requestOnlineInfo(kind, subj.id, !!force)
     }
-    function toggleInfoBar() { win.infoBarOpen = !win.infoBarOpen; win.infoKey = ""; loadInfoBar(false) }
-    Connections { target: nav; function onPageChanged() { win.loadInfoBar(false) } function onArtistChanged() { win.loadInfoBar(false) } function onAlbumChanged() { win.loadInfoBar(false) } }
+    function toggleInfoBar() {
+        var show = !content.infoBarShown
+        win.infoBarOpen = show; win.infoBarForced = show; win.infoKey = ""
+        library.setSetting("infobar", show ? "1" : "0")
+        loadInfoBar(false)
+    }
+    Connections { target: nav; function onPageChanged() { win.infoBarForced = false; win.loadInfoBar(false) } function onArtistChanged() { win.loadInfoBar(false) } function onAlbumChanged() { win.loadInfoBar(false) } }
     Connections {
         target: library
         function onOnlineInfo(kind, id, json) {
             var data = JSON.parse(json); id = Number(id)
             if (kind === "track" && infoPage.info && infoPage.info.id === id) { infoPage.online = data; infoPage.loading = false }
-            if ((kind === "artist" || kind === "album") && win.infoKey === kind + ":" + id) { infoBar.online = data; infoBar.loading = false }
+            if (kind === "artist" && win.infoKey === kind + ":" + id) { infoBar.online = data; infoBar.loading = false }
+            if (kind === "album" && win.albumInfoKey === "album:" + id) { albumPage.aboutOnline = data; albumPage.aboutLoading = false }
         }
     }
     // Exact name first, then the main artist of "A feat. B" / "A & B".
@@ -856,7 +880,7 @@ Window {
             }
             Timer { id: searchTimer; interval: 120; onTriggered: songs.search(search.text) }
 
-            readonly property bool infoBarShown: win.infoBarOpen && (nav.page === "artist" || nav.page === "album") && !win.lyricsMode
+            readonly property bool infoBarShown: win.infoBarOpen && nav.page === "artist" && !win.lyricsMode && (!infoBarOverlay || win.infoBarForced)
             readonly property bool infoBarOverlay: content.width < 700
             InfoBar {
                 id: infoBar
@@ -865,7 +889,7 @@ Window {
                 width: content.infoBarOverlay ? content.width : Math.min(360, Math.max(300, content.width * 0.4))
                 visible: content.infoBarShown
                 playingId: player.current ? player.current.id : -1
-                onCloseRequested: { win.infoBarOpen = false; win.infoKey = "" }
+                onCloseRequested: { win.infoBarOpen = false; win.infoBarForced = false; win.infoKey = ""; library.setSetting("infobar", "0") }
                 onPlayTracks: (t, i) => player.playList(t, i)
                 onOpenAlbum: (a) => nav.openAlbum(a)
                 onOpenLink: (url) => Qt.openUrlExternally(url)
@@ -937,7 +961,7 @@ Window {
                                     }
                                 }
                                 FlatButton {
-                                    icon: "info"; tip: "Sobre o artista"; color: win.infoBarOpen ? Theme.selected : Theme.hover
+                                    icon: "info"; tip: "Sobre o artista"; color: content.infoBarShown ? Theme.selected : Theme.hover
                                     onClicked: win.toggleInfoBar()
                                 }
                             }
@@ -959,8 +983,9 @@ Window {
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onOpenArtist: (id) => nav.openArtistById(id)
-                    infoOpen: win.infoBarOpen
-                    onInfoRequested: win.toggleInfoBar()
+                    onOpenLink: (url) => Qt.openUrlExternally(url)
+                    onOpenFolder: (url) => Qt.openUrlExternally(url)
+                    onRefreshAbout: win.loadAlbumAbout(true)
                 }
                 InfoPage {
                     id: infoPage
@@ -1278,7 +1303,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.7",
+        onAbout: prompt.info("Arara Music 0.7.8",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     PreferencesDialog {

@@ -12,8 +12,14 @@ Flickable {
     signal menuRequested(var track, real x, real y)
     signal starToggled(var track, bool starred)
     signal openArtist(int artistId)
-    signal infoRequested()
-    property bool infoOpen: false
+    // "Sobre o álbum" shown right on the page (left column, or under the tracks when narrow).
+    property var aboutInfo: null
+    property var aboutOnline: null
+    property bool aboutLoading: false
+    property bool aboutOff: false
+    signal openLink(string url)
+    signal openFolder(string url)
+    signal refreshAbout()
 
     clip: true
     contentHeight: body.height + 48
@@ -25,14 +31,14 @@ Flickable {
         width: Math.min(page.width - 48, 1000)
         x: (page.width - width) / 2
         y: 24
-        height: wide ? Math.max(info.height, list.height) : info.height + 24 + list.height
+        height: wide ? Math.max(info.height + 28 + about.height, list.height) : info.height + 24 + list.height + 32 + about.height
 
         Column {
             id: info
-            width: wide ? 260 : body.width
+            width: wide ? (body.width >= 880 ? 300 : 260) : body.width
             spacing: 10
             CoverArt {
-                width: Math.min(260, parent.width); height: width
+                width: Math.min(wide ? parent.width : 260, parent.width); height: width
                 x: wide ? 0 : (parent.width - width) / 2
                 decode: 260
                 source: page.album ? page.album.coverBig : ""
@@ -65,11 +71,26 @@ Flickable {
                         page.play(t, 0)
                     }
                 }
-                FlatButton {
-                    icon: "info"; tip: "Sobre o álbum"; color: page.infoOpen ? Theme.selected : Theme.hover
-                    onClicked: page.infoRequested()
-                }
             }
+        }
+
+        InfoBar {
+            id: about
+            embedded: true
+            kind: "album"
+            x: 0
+            y: wide ? info.height + 28 : list.y + list.height + 32
+            width: wide ? info.width : body.width
+            height: implicitHeight
+            subject: page.album
+            info: page.aboutInfo
+            online: page.aboutOnline
+            loading: page.aboutLoading
+            onlineOff: page.aboutOff
+            playingId: page.playingId
+            onOpenLink: (url) => page.openLink(url)
+            onOpenFolder: (url) => page.openFolder(url)
+            onRefreshOnline: page.refreshAbout()
         }
 
         Rectangle {

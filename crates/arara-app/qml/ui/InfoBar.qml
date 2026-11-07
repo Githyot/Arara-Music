@@ -12,6 +12,10 @@ Rectangle {
     property bool loading: false
     property bool onlineOff: false
     property int playingId: -1
+    // Inline in a page (album left column): no header, cover or own scrolling;
+    // the height follows the content.
+    property bool embedded: false
+    implicitHeight: embedded ? col.height + 8 : 0
     signal closeRequested()
     signal playTracks(var tracks, int index)
     signal openAlbum(var album)
@@ -19,12 +23,12 @@ Rectangle {
     signal refreshOnline()
     signal openFolder(string url)
 
-    color: Theme.viewBg
-    clip: true
-    Rectangle { anchors { left: parent.left; top: parent.top; bottom: parent.bottom } width: 1; color: Theme.border }
+    color: embedded ? "transparent" : Theme.viewBg
+    clip: !embedded
+    Rectangle { visible: !bar.embedded; anchors { left: parent.left; top: parent.top; bottom: parent.bottom } width: 1; color: Theme.border }
 
     // Swallow clicks so they don't reach the page underneath.
-    MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: (w) => w.accepted = false }
+    MouseArea { enabled: !bar.embedded; anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: (w) => w.accepted = false }
 
     readonly property bool isArtist: kind === "artist"
     readonly property var stats: info && info.stats ? info.stats : ({})
@@ -90,8 +94,9 @@ Rectangle {
             kv("País", online.country)
             kv("Descrição", online.disambiguation)
         } else {
-            kv("Lançamento", niceDate(online.date))
-            if (online.firstDate && online.firstDate !== online.date) kv("Primeiro lançamento", niceDate(online.firstDate))
+            // The original release date, like Wikipedia; a later edition's date only if different.
+            kv("Lançamento", niceDate(online.firstDate || online.date))
+            if (online.firstDate && online.date && online.date.slice(0, 4) !== online.firstDate.slice(0, 4)) kv("Esta edição", niceDate(online.date))
             kv("Gravadora", online.label)
             kv("Catálogo", online.catalog)
             kv("País", countries(online.country))
@@ -126,7 +131,7 @@ Rectangle {
             kv("Qualidade", (info.grade ? info.grade + " · " : "") + (info.qualities || []).slice(0, 2).join(" / "))
             kv("Reproduções", stats.plays)
             kv("Adicionado em", unixDate(stats.addedAt))
-            kv("Pasta", info.folder, "folder")
+            kv("Pasta", info.folder ? String(info.folder).split(/[\\/]/).filter(function (x) { return x !== "" }).pop() : "", "folder")
         }
         return r
     }
@@ -135,7 +140,8 @@ Rectangle {
     Item {
         id: head
         anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 1 }
-        height: Theme.headerHeight
+        visible: !bar.embedded
+        height: bar.embedded ? 0 : Theme.headerHeight
         Text {
             anchors { left: parent.left; leftMargin: 18; verticalCenter: parent.verticalCenter }
             text: bar.isArtist ? "Sobre o artista" : "Sobre o álbum"
@@ -150,20 +156,22 @@ Rectangle {
     Flickable {
         id: flick
         anchors { left: parent.left; right: parent.right; top: head.bottom; bottom: parent.bottom; leftMargin: 1 }
-        clip: true
+        clip: !bar.embedded
+        interactive: !bar.embedded
         contentHeight: col.height + 40
         boundsBehavior: Flickable.StopAtBounds
 
         Column {
             id: col
-            x: 18; width: flick.width - 36
-            y: 4
+            x: bar.embedded ? 0 : 18; width: flick.width - (bar.embedded ? 0 : 36)
+            y: bar.embedded ? 0 : 4
             spacing: 18
 
             Column {
                 width: parent.width
                 spacing: 8
                 CoverArt {
+                    visible: !bar.embedded
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: bar.isArtist ? 132 : Math.min(220, parent.width); height: width
                     radius: bar.isArtist ? width / 2 : Math.max(3, Math.round(width * Theme.coverRound))
@@ -172,12 +180,13 @@ Rectangle {
                                          : (bar.subject ? bar.subject.coverBig || bar.subject.cover || "" : "")
                 }
                 Text {
+                    visible: !bar.embedded
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
                     text: bar.subject ? ((bar.isArtist ? bar.subject.name : bar.subject.title) || "") : ""
                     color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.headingSize + 2; font.weight: Theme.titleWeight
                 }
                 Text {
-                    visible: text !== ""
+                    visible: text !== "" && !bar.embedded
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
                     text: bar.subtitle
                     color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize

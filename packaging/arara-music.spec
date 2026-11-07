@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.7
+Version:        0.7.8
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,12 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.8-1
+- "Sobre o álbum" aparece direto na página do álbum, embaixo da capa e dos
+  botões (ou embaixo das faixas em janelas estreitas)
+- A barra "Sobre o artista" já abre sozinha quando há espaço
+- Lançamento do álbum mostra a data original, como na Wikipédia
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.7-1
 - Retrospectiva (como Spotify Wrapped / Apple Music Replay): tempo ouvido por
   artista, música, álbum e gênero, por semana, mês, ano ou desde sempre

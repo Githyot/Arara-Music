@@ -92,7 +92,7 @@ Column {
                             horizontalAlignment: Text.AlignRight
                             text: row.modelData.v === undefined || row.modelData.v === null ? "" : String(row.modelData.v)
                             color: row.modelData.link ? Theme.accentFg : Theme.fg
-                            wrapMode: Text.WrapAnywhere; maximumLineCount: 4; elide: Text.ElideRight
+                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere; maximumLineCount: 6; elide: Text.ElideRight
                             font.family: Theme.font; font.pointSize: Theme.fontSize
                         }
                     }
