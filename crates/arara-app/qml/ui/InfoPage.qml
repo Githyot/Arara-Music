@@ -17,6 +17,7 @@ Flickable {
     signal openArtistByName(string name)
     signal starToggled(var track, bool starred)
     signal menuRequested(var track, real x, real y)
+    signal editRequested(var track)
     signal showInFolder(var track)
     signal refreshOnline(var track)
     signal openLink(string url)
@@ -55,7 +56,11 @@ Flickable {
         return b >= 1048576 ? (b / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.round(b / 1024) + " KB"
     }
     function releaseDate() {
-        return niceDate(fields.releaseDate || fields.originalDate || (online && online.firstDate) || fields.recordingDate || (info && info.year ? String(info.year) : ""))
+        var d = fields.releaseDate || fields.originalDate || (online && online.firstDate) || fields.recordingDate || ""
+        var y = info && info.year ? String(info.year) : ""
+        // An edited year wins over a full date that no longer matches it.
+        if (y && String(d).slice(0, 4) !== y) d = y
+        return niceDate(d)
     }
 
     // Credits: file tags first, then MusicBrainz, merged by name.
@@ -73,6 +78,8 @@ Flickable {
             out.push({ name: c.name, role: c.role, inLibrary: knownArtists.indexOf(key) >= 0 })
         }
         var tagC = file.credits || []
+        if (info && info.edited) tagC = tagC.filter(function (c) { return c.role !== "Artista" && c.role !== "Participação" })
+        if (info && info.edited && info.artist) add({ name: info.artist, role: "Artista" })
         tagC.forEach(add)
         if (online && online.credits) online.credits.forEach(add)
         if (out.length === 0 && info && info.artist) add({ name: info.artist, role: "Artista" })
@@ -191,6 +198,10 @@ Flickable {
                     icon: page.info && page.info.starred ? "star" : "unstar"; size: 38; color: Theme.hover
                     iconColor: page.info && page.info.starred ? Theme.accentFg : undefined
                     onClicked: { var s = !page.info.starred; page.starToggled(page.info, s); var i = page.info; i.starred = s; page.info = null; page.info = i }
+                }
+                FlatButton {
+                    icon: "edit"; size: 38; color: Theme.hover; tip: "Editar informações"
+                    onClicked: page.editRequested(page.info)
                 }
                 FlatButton {
                     id: moreBtn; icon: "more"; size: 38; color: Theme.hover

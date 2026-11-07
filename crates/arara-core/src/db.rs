@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS playlist_items (
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 
+-- Song details the user edited without writing the file (servers, read-only
+-- disks): re-applied whenever the scanner or a sync refreshes the song.
+CREATE TABLE IF NOT EXISTS track_overrides (path TEXT PRIMARY KEY, json TEXT NOT NULL);
+
 -- Transition analysis (silence, fade ramps, loudness, tempo), see analysis.rs.
 CREATE TABLE IF NOT EXISTS track_analysis (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
@@ -148,6 +152,13 @@ pub struct NewTrack<'a> {
 /// Insert/update one track (plus its artist, album and search entry) on an open
 /// transaction. Returns true when a cover hash was written to its album.
 pub fn upsert_track(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
+    if let Some(d) = crate::edit::with_override(c, p)? {
+        return upsert_raw(c, &d.as_new(), now);
+    }
+    upsert_raw(c, p, now)
+}
+
+fn upsert_raw(c: &Connection, p: &NewTrack, now: i64) -> Result<bool> {
     let aa = if p.album_artist.is_empty() { "Artista desconhecido" } else { p.album_artist };
     c.execute("INSERT OR IGNORE INTO artists(name) VALUES (?1)", [aa])?;
     let artist_id: i64 = c.query_row("SELECT id FROM artists WHERE name=?1", [aa], |r| r.get(0))?;
@@ -555,6 +566,8 @@ impl Db {
             && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_analysis'")
             && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='art_hash'")
             && q("SELECT 1 FROM pragma_table_info('albums') WHERE name='cover_user'")
+            // 0.7.13: song edits kept in the library.
+            && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_overrides'")
     }
 
     /// Forget a hand-picked cover and mark the album's local files for the next

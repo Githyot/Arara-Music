@@ -7,6 +7,7 @@ pub mod downloads;
 pub mod explicit;
 pub mod freemusic;
 pub mod db;
+pub mod edit;
 pub mod import;
 pub mod info;
 pub mod lyrics;

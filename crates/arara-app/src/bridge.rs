@@ -426,6 +426,29 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "lyricsText"]
         fn lyrics_text(self: &Library, track_id: i64) -> QString;
+        /// What the "Editar informações" dialog shows for one song (library data only).
+        #[qinvokable]
+        #[cxx_name = "editableJson"]
+        fn editable_json(self: &Library, track_id: i64) -> QString;
+
+        /// Save edited details (JSON with title, artist, albumArtist, album,
+        /// trackNo, discNo, year, genre, composer). `cover` is an image file
+        /// ("" keeps the picture). With `write_file`, local files get the tags
+        /// written into them. Runs in the background; answers with trackEdited.
+        #[qinvokable]
+        #[cxx_name = "saveTrackEdit"]
+        fn save_track_edit(self: Pin<&mut Library>, track_id: i64, json: &QString, cover: &QString, write_file: bool);
+
+        /// Drop changes kept only in the library; the song is read again from its file or server.
+        #[qinvokable]
+        #[cxx_name = "revertTrackEdit"]
+        fn revert_track_edit(self: Pin<&mut Library>, track_id: i64) -> bool;
+
+        /// `json`: {trackId, wroteFile, warning, error, track} (track = the song as the lists show it).
+        #[qsignal]
+        #[cxx_name = "trackEdited"]
+        fn track_edited(self: Pin<&mut Library>, track_id: i64, json: QString);
+
         #[qsignal]
         #[cxx_name = "analysisReady"]
         fn analysis_ready(self: Pin<&mut Library>, track_id: i64, json: QString);
@@ -1325,6 +1348,7 @@ impl qobject::Library {
         } else {
             String::new()
         });
+        v["edited"] = json!(arara_core::edit::override_for(&db.conn, &t.path).ok().flatten().is_some());
         v["hasLyrics"] = json!(db.cached_lyrics(track_id).ok().flatten().map(|(src, a, b)| src != "none" && (a.is_some() || b.is_some())).unwrap_or(false));
         v["file"] = if local { arara_core::info::file_details(&t.path) } else { json!({}) };
         qs(&v.to_string())
@@ -1538,6 +1562,72 @@ impl qobject::Library {
             let s = data.to_string();
             let _ = qt.queue(move |o| o.tag_online(qs(&tag), qs(&s)));
         });
+    }
+
+    // ---------- editing a song ----------
+
+    pub fn editable_json(&self, track_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("null") };
+        let Ok(Some(f)) = arara_core::edit::fields(db, track_id) else { return qs("null") };
+        let mut v = serde_json::to_value(&f).unwrap_or(json!(null));
+        v["cover"] = json!(self.cover(&f.cover_hash, 640));
+        qs(&v.to_string())
+    }
+
+    pub fn save_track_edit(self: Pin<&mut Self>, track_id: i64, json: &QString, cover: &QString, write_file: bool) {
+        let qt = self.qt_thread();
+        let edit: arara_core::edit::TrackEdit = match serde_json::from_str(&json.to_string()) {
+            Ok(e) => e,
+            Err(e) => {
+                let msg = json!({ "trackId": track_id, "error": format!("dados inválidos: {e}") }).to_string();
+                let _ = qt.queue(move |o| o.track_edited(track_id, qs(&msg)));
+                return;
+            }
+        };
+        let cover = cover.to_string();
+        let cover = (!cover.is_empty()).then(|| remote::url_to_path(&cover));
+        let (db_path, covers_dir) = (self.db_path.clone(), self.covers_dir.clone());
+        // Files may sit on a slow or locked disk: never touch them on the UI thread.
+        std::thread::spawn(move || {
+            let res = (|| -> Result<arara_core::edit::EditOutcome, String> {
+                let db = Db::open(&db_path).map_err(|e| e.to_string())?;
+                let covers = CoverCache::new(&covers_dir).map_err(|e| e.to_string())?;
+                let bytes = match &cover {
+                    Some(p) => {
+                        Some(std::fs::read(p).map_err(|e| format!("não foi possível abrir a imagem: {e}"))?)
+                    }
+                    None => None,
+                };
+                arara_core::edit::apply(&db, &covers, track_id, edit, bytes, write_file).map_err(|e| match e {
+                    arara_core::Error::Image(_) => "o arquivo escolhido não é uma imagem".to_string(),
+                    e => e.to_string(),
+                })
+            })();
+            let _ = qt.queue(move |mut o| {
+                let mut v = match res {
+                    Ok(out) => serde_json::to_value(&out).unwrap_or(json!({})),
+                    Err(e) => json!({ "trackId": track_id, "error": e }),
+                };
+                if v.get("error").is_none() {
+                    o.as_mut().refresh_counts();
+                    o.as_mut().library_changed();
+                    o.as_mut().playlists_changed();
+                }
+                let track = o.db.as_ref().and_then(|d| d.track(track_id).ok().flatten()).map(|t| o.track_value(&t));
+                v["track"] = track.unwrap_or(json!(null));
+                o.as_mut().track_edited(track_id, qs(&v.to_string()));
+            });
+        });
+    }
+
+    pub fn revert_track_edit(mut self: Pin<&mut Self>, track_id: i64) -> bool {
+        let Some(db) = &self.db else { return false };
+        let undone = arara_core::edit::revert(db, track_id).unwrap_or(false);
+        if undone {
+            // Local: re-read the file now. Server songs come back on the next sync.
+            self.as_mut().rescan();
+        }
+        undone
     }
 
     pub fn show_in_folder(&self, track_id: i64) -> bool {
@@ -1869,7 +1959,7 @@ impl qobject::Library {
             const IMAGES: &[&str] = &["*.jpg", "*.jpeg", "*.png", "*.webp", "*.JPG", "*.JPEG", "*.PNG"];
             let filters: &[(&str, &[&str])] = if directory {
                 &[]
-            } else if purpose.starts_with("cover:") {
+            } else if purpose.starts_with("cover:") || purpose == "trackcover" {
                 &[("Imagens", IMAGES), ("Todos os arquivos", &["*"])]
             } else {
                 &[("Exportações de playlists", EXPORTS), ("Todos os arquivos", &["*"])]
