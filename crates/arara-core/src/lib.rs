@@ -14,6 +14,7 @@ pub mod natural;
 pub mod query;
 pub mod remote;
 pub mod scanner;
+pub mod stats;
 pub mod watcher;
 
 use std::path::PathBuf;

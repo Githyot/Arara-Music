@@ -34,7 +34,7 @@ Window {
         tilesize: "medium", fontscale: 1.0, compact: false, reducemotion: false,
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
         autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
-        explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true,
+        explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true, listening: true,
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
@@ -65,6 +65,7 @@ Window {
         toast.show("Preferências restauradas")
     }
     readonly property bool autoplay: prefs.autoplay
+    readonly property bool trackListening: prefs.listening
     readonly property bool coverAccent: prefs.accent === "cover"
     readonly property bool autoLyrics: prefs.autolyrics
     readonly property string jamendoKey: prefs.jamendo
@@ -226,6 +227,7 @@ Window {
         // `mixed`: the decks already started this song (automatic transition).
         function start(autoplay, mixed) {
             if (!current) { decks.stopAll(); return }
+            listen.restart()
             if (!mixed) {
                 var from = xf.startFor(current)
                 // A song changed by hand while one is playing: short crossfade, if enabled.
@@ -241,7 +243,7 @@ Window {
             save()
         }
         function next() {
-            if (repeat === "one" && media.mediaStatus === MediaPlayer.EndOfMedia) { decks.load(current, 0, true); return }
+            if (repeat === "one" && media.mediaStatus === MediaPlayer.EndOfMedia) { listen.restart(); decks.load(current, 0, true); return }
             if (index + 1 < queue.length) { index++; start(true) }
             else if (repeat === "all" && queue.length > 0) { index = 0; start(true) }
             else if (win.autoplay && current && extendAutoplay()) { index++; start(true) }
@@ -493,6 +495,40 @@ Window {
         running: xf.mode !== "off" && media.playbackState === MediaPlayer.PlayingState
         onTriggered: xf.tick()
     }
+
+    // Listening time for the recap ("Retrospectiva"): only time actually heard
+    // counts (pauses, seeks and skipped parts don't). Saved every 15 s, on track
+    // change and on quit.
+    Timer {
+        id: listen
+        property int forId: -1      // track the open listen belongs to
+        property real listenId: 0
+        property real pending: 0    // ms heard but not saved yet
+        property real lastPos: -1
+        property real lastTick: 0
+        interval: 1000; repeat: true
+        running: media.playbackState === MediaPlayer.PlayingState && win.trackListening
+        onRunningChanged: if (!running) { lastPos = -1; flush() }
+        onTriggered: {
+            var t = player.current
+            if (!t || !(t.id > 0)) return
+            var now = Date.now()
+            if (forId !== t.id) { flush(); forId = t.id; listenId = library.beginListen(t.id); lastPos = media.position; lastTick = now; return }
+            // Count wall-clock time while the position moves forward; a jump
+            // much bigger than the time passed is a seek and doesn't count.
+            var d = media.position - lastPos, w = lastPos < 0 ? 0 : now - lastTick
+            lastPos = media.position; lastTick = now
+            if (d > 0 && w > 0 && d <= w * 1.5 + 2000) pending += Math.min(d, w, 5000)
+            if (pending >= 15000) flush()
+        }
+        function flush() {
+            if (listenId > 0 && pending > 0) library.addListenTime(listenId, Math.round(pending))
+            pending = 0
+        }
+        // The same song again (repeat one, replay) is a new listen.
+        function restart() { flush(); forId = -1; listenId = 0; lastPos = -1 }
+    }
+
     // Current lyric line → D-Bus (for desktop widgets / floating lyrics).
     readonly property int lyricIndex: {
         var ls = win.lyrics && win.lyrics.kind === "synced" ? win.lyrics.lines : []
@@ -633,7 +669,7 @@ Window {
             : page === "playlist" ? "Playlist"
             : page === "server" ? "Servidor"
             : page === "trackinfo" ? "Informações"
-            : page === "songs" ? "Músicas" : page === "free" ? "" : "Álbuns"
+            : page === "songs" ? "Músicas" : page === "free" || page === "recap" ? "" : "Álbuns"
     }
 
     // Now-playing panel → artist / album pages of the current track.
@@ -1006,6 +1042,25 @@ Window {
                     })
                 }
 
+                RecapPage {
+                    id: recapPage
+                    anchors.fill: parent
+                    visible: nav.page === "recap"
+                    onVisibleChanged: if (visible) reload()
+                    tracking: win.trackListening
+                    onPlayTrack: (id) => {
+                        var t = JSON.parse(library.tracksByIdsJson(JSON.stringify([id])))
+                        if (t.length) player.playList(t, 0); else toast.show("Essa música não está mais na biblioteca")
+                    }
+                    onPlayTop: (ids) => {
+                        var t = JSON.parse(library.tracksByIdsJson(JSON.stringify(ids)))
+                        if (t.length) player.playList(t, 0); else toast.show("Essas músicas não estão mais na biblioteca")
+                    }
+                    onOpenArtist: (id) => nav.openArtistById(id)
+                    onOpenAlbum: (id) => nav.openAlbumById(id)
+                    onTurnOn: win.setPref("listening", true)
+                }
+
                 FreePage {
                     id: freePage
                     anchors.fill: parent
@@ -1235,6 +1290,9 @@ Window {
         onChooseFolders: { foldersDialog.dirs = JSON.parse(library.libraryDirsJson()); foldersDialog.open() }
         onRescan: { library.changeLibraryDir(library.libraryDir); toast.show("Reindexando a biblioteca…") }
         onResetAll: prompt.confirm("Restaurar as preferências?", "Tema, cores, reprodução e letras voltam ao padrão.", "Restaurar", function () { win.resetPrefs() })
+        onClearHistory: prompt.confirm("Apagar o histórico de escuta?", "Todas as retrospectivas voltam a zero. Não dá para desfazer.", "Apagar", function () {
+            listen.restart(); library.clearListens(); recapPage.reload(); toast.show("Histórico de escuta apagado")
+        })
     }
     FolderDialog {
         id: folderDialog
@@ -1281,7 +1339,7 @@ Window {
         }
     }
 
-    onClosing: player.save()
+    onClosing: { listen.flush(); player.save() }
 
     Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible && !addServer.visible && !importDialog.visible; onActivated: playerBar.toggle() }
     Shortcut { sequence: "Ctrl+F"; onActivated: nav.go("songs") }

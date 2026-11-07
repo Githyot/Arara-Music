@@ -13,6 +13,7 @@ Item {
     signal chooseFolders()
     signal rescan()
     signal resetAll()
+    signal clearHistory()
     function set(k, v) { if (setFn) setFn(k, v) }
     function get(k) { return prefs[k] }
     function open() { visible = true; card.forceActiveFocus() }
@@ -446,7 +447,7 @@ Item {
                             model: [
                                 { k: "genre", t: "Gêneros" }, { k: "year", t: "Anos" }, { k: "composer", t: "Compositores" },
                                 { k: "folder", t: "Pastas" }, { k: "added", t: "Adicionadas recentemente" }, { k: "recent", t: "Tocadas recentemente" },
-                                { k: "mostplayed", t: "Mais tocadas" }, { k: "free", t: "Música livre" }, { k: "servers", t: "Servidores" }
+                                { k: "mostplayed", t: "Mais tocadas" }, { k: "recap", t: "Retrospectiva" }, { k: "free", t: "Música livre" }, { k: "servers", t: "Servidores" }
                             ]
                             SwitchRow {
                                 required property var modelData
@@ -459,6 +460,24 @@ Item {
                                     dlg.set("hidden", h)
                                 }
                             }
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "library"
+                        title: "Retrospectiva"
+                        description: "O tempo que você passa ouvindo cada música, artista e álbum. Fica só neste computador."
+                        SwitchRow {
+                            title: "Registrar o que eu ouço"
+                            subtitle: "Pausas e partes puladas não contam"
+                            checked: dlg.get("listening")
+                            onToggled: dlg.set("listening", !checked)
+                        }
+                        ButtonRow {
+                            title: "Apagar histórico de escuta"
+                            subtitle: "Zera todas as retrospectivas. Não dá para desfazer."
+                            button: "Apagar…"
+                            destructive: true
+                            onClicked: dlg.clearHistory()
                         }
                     }
                     Group {

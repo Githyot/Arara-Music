@@ -26,6 +26,8 @@ fn main() {
         "qml/ui/LyricsScreen.qml",
         "qml/ui/VolumeSlider.qml",
         "qml/ui/FreePage.qml",
+        "qml/ui/RecapPage.qml",
+        "qml/ui/RecapStory.qml",
         "qml/ui/SortMenu.qml",
         "qml/ui/FoldersDialog.qml",
         "qml/ui/LyricsView.qml",

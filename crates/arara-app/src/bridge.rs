@@ -108,6 +108,40 @@ pub mod qobject {
         #[cxx_name = "recordPlay"]
         fn record_play(self: &Library, track_id: i64);
 
+        /// Listening history for the recap: a song started (returns the listen id)…
+        #[qinvokable]
+        #[cxx_name = "beginListen"]
+        fn begin_listen(self: &Library, track_id: i64) -> i64;
+
+        /// …and this much of it was actually heard since the last call.
+        #[qinvokable]
+        #[cxx_name = "addListenTime"]
+        fn add_listen_time(self: &Library, listen_id: i64, ms: i64);
+
+        /// Recap ("Retrospectiva") for [from, to) in unix seconds; to <= 0 means "until now".
+        #[qinvokable]
+        #[cxx_name = "recapJson"]
+        fn recap_json(self: &Library, from: i64, to: i64) -> QString;
+
+        /// Total time heard in [from, to), in ms.
+        #[qinvokable]
+        #[cxx_name = "listenedMs"]
+        fn listened_ms(self: &Library, from: i64, to: i64) -> f64;
+
+        /// Unix time of the first listen ever (0 when there is no history).
+        #[qinvokable]
+        #[cxx_name = "firstListen"]
+        fn first_listen(self: &Library) -> f64;
+
+        #[qinvokable]
+        #[cxx_name = "clearListens"]
+        fn clear_listens(self: &Library);
+
+        /// Library tracks by id, in the order given (ids no longer there are skipped).
+        #[qinvokable]
+        #[cxx_name = "tracksByIdsJson"]
+        fn tracks_by_ids_json(self: &Library, ids_json: &QString) -> QString;
+
         #[qinvokable]
         #[cxx_name = "playlistsJson"]
         fn playlists_json(self: &Library) -> QString;
@@ -888,6 +922,62 @@ impl qobject::Library {
     pub fn record_play(&self, track_id: i64) {
         if let Some(db) = &self.db {
             let _ = db.record_play(track_id, now());
+        }
+    }
+
+    pub fn begin_listen(&self, track_id: i64) -> i64 {
+        self.db.as_ref().and_then(|db| db.begin_listen(track_id, now()).ok()).unwrap_or(0)
+    }
+
+    pub fn add_listen_time(&self, listen_id: i64, ms: i64) {
+        if let Some(db) = &self.db {
+            let _ = db.add_listen_ms(listen_id, ms);
+        }
+    }
+
+    pub fn recap_json(&self, from: i64, to: i64) -> QString {
+        let Some(db) = &self.db else { return qs("{}") };
+        let to = if to <= 0 { i64::MAX } else { to };
+        let Ok(r) = db.recap(from, to, 10) else { return qs("{}") };
+        let ranked = |v: &[arara_core::stats::Ranked]| -> Vec<serde_json::Value> {
+            v.iter()
+                .map(|x| json!({
+                    "name": x.name, "artist": x.artist, "ms": x.ms, "plays": x.plays, "id": x.id,
+                    "cover": self.cover(&x.cover_hash, 256), "coverBig": self.cover(&x.cover_hash, 640),
+                }))
+                .collect()
+        };
+        let v = json!({
+            "totalMs": r.total_ms, "plays": r.plays, "tracks": r.tracks, "artists": r.artists,
+            "albums": r.albums, "daysActive": r.days_active, "streak": r.longest_streak,
+            "topArtists": ranked(&r.top_artists), "topTracks": ranked(&r.top_tracks),
+            "topAlbums": ranked(&r.top_albums), "topGenres": ranked(&r.top_genres),
+            "newArtists": ranked(&r.new_artists),
+            "hours": r.hours, "weekdays": r.weekdays,
+            "days": r.days.iter().map(|(d, ms)| json!({ "d": d, "ms": ms })).collect::<Vec<_>>(),
+            "firstListen": r.first_listen,
+        });
+        qs(&v.to_string())
+    }
+
+    pub fn listened_ms(&self, from: i64, to: i64) -> f64 {
+        let to = if to <= 0 { i64::MAX } else { to };
+        self.db.as_ref().and_then(|db| db.listened_ms(from, to).ok()).unwrap_or(0) as f64
+    }
+
+    pub fn first_listen(&self) -> f64 {
+        self.db.as_ref().and_then(|db| db.first_listen().ok().flatten()).unwrap_or(0) as f64
+    }
+
+    pub fn tracks_by_ids_json(&self, ids_json: &QString) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let ids: Vec<i64> = serde_json::from_str(&ids_json.to_string()).unwrap_or_default();
+        self.tracks_to_json(db.tracks_by_ids(&ids))
+    }
+
+    pub fn clear_listens(&self) {
+        if let Some(db) = &self.db {
+            let _ = db.clear_listens();
         }
     }
 
