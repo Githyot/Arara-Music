@@ -93,13 +93,14 @@ Rectangle {
         visible: opacity > 0
         opacity: panel.tab === "player" ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: Theme.ms(200) } }
-        anchors { left: parent.left; right: parent.right; top: closeBtn.bottom; bottom: parent.bottom; leftMargin: 20; rightMargin: 20 }
+        anchors { left: parent.left; right: parent.right; top: closeBtn.bottom; bottom: parent.bottom }
         contentHeight: Math.max(height, col.height + 24)
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         Column {
             id: col
-            width: parent.width
+            // side margins live here (not on the Flickable) so its clip doesn't cut the cover shadow
+            x: 20; width: parent.width - 40
             spacing: 14
             // Cover: full size while playing, shrinks back a little when paused,
             // with a springy zoom between the two (like Apple Music).
@@ -112,19 +113,19 @@ Rectangle {
                     anchors.fill: parent
                     scale: panel.playing ? 1 : 0.8
                     Behavior on scale { NumberAnimation { duration: Theme.ms(520); easing.type: Easing.OutBack; easing.overshoot: 1.3 } }
-                    // soft shadow, stronger while playing
-                    Repeater {
-                        model: 4
-                        Rectangle {
-                            required property int index
-                            anchors.fill: parent
-                            anchors.margins: -(index + 1) * 3
-                            anchors.topMargin: -(index + 1) * 3 + 8
-                            radius: parent.width * Theme.coverRound + (index + 1) * 3
-                            color: "black"
-                            opacity: panel.playing ? 0.07 : 0.035
-                            Behavior on opacity { NumberAnimation { duration: 400 } }
-                        }
+                    // soft, blurred drop shadow below the cover (Apple Music look),
+                    // a bit deeper while playing
+                    ShaderEffect {
+                        readonly property real blur: Math.max(10, parent.width * 0.09)
+                        property real margin: blur * 2
+                        property size size: Qt.size(width, height)
+                        property real radius: parent.width * Theme.coverRound
+                        property real offsetY: parent.width * 0.035
+                        property real strength: panel.playing ? 0.34 : 0.2
+                        Behavior on strength { NumberAnimation { duration: 400 } }
+                        x: -margin; y: -margin
+                        width: parent.width + margin * 2; height: parent.height + margin * 2
+                        fragmentShader: "qrc:/qt/qml/AraraStyle/shadow.frag.qsb"
                     }
                     CoverArt {
                         anchors.fill: parent
