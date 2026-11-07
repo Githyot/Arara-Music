@@ -22,6 +22,8 @@ Rectangle {
     signal openLink(string url)
     signal refreshOnline()
     signal openFolder(string url)
+    // A genre chip was clicked: show what else in the library has that genre.
+    signal openTag(string tag)
 
     color: embedded ? "transparent" : Theme.viewBg
     clip: !embedded
@@ -202,8 +204,17 @@ Rectangle {
                             required property var modelData
                             height: 24; radius: 12
                             width: gt.implicitWidth + 20
-                            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, Theme.dark ? 0.22 : 0.12)
+                            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, (Theme.dark ? 0.22 : 0.12) + (gm.containsMouse ? 0.14 : 0))
+                            scale: gm.pressed ? 0.95 : 1
+                            Behavior on scale { NumberAnimation { duration: 120 } }
                             Text { id: gt; anchors.centerIn: parent; text: modelData; color: Theme.accentFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1.5; font.weight: Font.DemiBold }
+                            MouseArea {
+                                id: gm
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: bar.openTag(modelData)
+                            }
                         }
                     }
                 }
