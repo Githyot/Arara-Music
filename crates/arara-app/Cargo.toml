@@ -19,6 +19,7 @@ log = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 zbus = "4"
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 directories = "5"

@@ -148,6 +148,22 @@ Window {
         win.setPref("rate", r)
     }
 
+    // Everything that talks to the system (scan, D-Bus, audio devices, the
+    // restored song) starts only after the first frame is on screen, so the
+    // window always shows up even if one of those is slow.
+    property bool servicesStarted: false
+    function startServices() {
+        if (servicesStarted) return
+        servicesStarted = true
+        library.startServices()
+        if (win.prefs.restore) { library.heartbeat("restaurando a última música"); player.restore() }
+        library.heartbeat("pronto")
+    }
+    onFrameSwapped: if (!servicesStarted) Qt.callLater(startServices)
+    Timer { interval: 1500; running: !win.servicesStarted; onTriggered: win.startServices() }
+    // Freeze reporter: see watchdog.rs.
+    Timer { interval: 1000; running: true; repeat: true; onTriggered: library.heartbeat("") }
+
     Library {
         id: library
         Component.onCompleted: {
@@ -155,7 +171,6 @@ Window {
             win.userVolume = Number(library.setting("volume", "1"))
             win.loadPrefs()
             win.panelOpen = library.setting("panel", "1") === "1"
-            if (win.prefs.restore) player.restore()
         }
         onLibraryChanged: {
             albumGrid.albums = JSON.parse(library.albumsJson())

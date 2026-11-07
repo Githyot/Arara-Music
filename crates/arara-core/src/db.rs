@@ -435,6 +435,8 @@ impl Db {
             && q("SELECT 1 FROM pragma_table_info('playlists') WHERE name='query'")
             && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='explicit'")
             && q("SELECT 1 FROM sqlite_master WHERE type='index' AND name='tracks_added'")
+            // 0.7.6: databases upgraded from older versions never got this table.
+            && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_analysis'")
     }
 
     pub fn artist_id(&self, name: &str) -> Result<i64> {
@@ -836,6 +838,24 @@ pub(crate) fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_database_gets_analysis_table() {
+        let dir = std::env::temp_dir().join(format!("arara-mig-{}", std::process::id()));
+        let path = dir.join("db.sqlite");
+        let db = Db::open(&path).unwrap();
+        db.conn.execute_batch("DROP TABLE track_analysis").unwrap();
+        drop(db);
+        let db = Db::open(&path).unwrap();
+        let ok = db
+            .conn
+            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_analysis'")
+            .unwrap()
+            .exists([])
+            .unwrap();
+        assert!(ok);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn db_with_tracks(n: i64) -> Db {
         let db = Db::open_in_memory().unwrap();

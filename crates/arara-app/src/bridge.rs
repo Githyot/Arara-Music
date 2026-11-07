@@ -32,6 +32,16 @@ pub mod qobject {
         #[qinvokable]
         fn open(self: Pin<&mut Library>);
 
+        /// Scan, folder watching, MPRIS, appearance and server sync. Called once
+        /// the window is on screen, so nothing here can keep it from showing.
+        #[qinvokable]
+        #[cxx_name = "startServices"]
+        fn start_services(self: Pin<&mut Library>);
+
+        /// The UI thread is alive (freeze reporter); `what` names the step it starts.
+        #[qinvokable]
+        fn heartbeat(self: &Library, what: &QString);
+
         #[qinvokable]
         #[cxx_name = "startScan"]
         fn start_scan(self: Pin<&mut Library>, dir: &QString);
@@ -549,22 +559,42 @@ impl qobject::Library {
     }
 
     pub fn open(mut self: Pin<&mut Self>) {
+        crate::watchdog::step("abrindo o banco de dados");
         let db = Db::open(&self.db_path).ok();
         let stored_dir = db.as_ref().and_then(|d| d.get_kv("library_dir").ok().flatten());
         self.as_mut().rust_mut().resolver = db.as_ref().map(remote::Resolver::load).unwrap_or_default();
         self.as_mut().rust_mut().db = db;
         self.as_mut().refresh_counts();
+        let dir = stored_dir.unwrap_or_else(default_music_dir);
+        self.as_mut().set_library_dir(qs(&dir));
+        crate::watchdog::step("lendo a biblioteca salva");
         self.as_mut().library_changed();
         self.as_mut().playlists_changed();
-
-        let dir = stored_dir.unwrap_or_else(default_music_dir);
-        self.as_mut().start_scan(&qs(&dir));
-        self.as_mut().start_watching(&dir);
-        self.as_mut().start_desktop_integration();
         self.as_mut().servers_changed();
+    }
+
+    pub fn start_services(mut self: Pin<&mut Self>) {
+        let dir = self.library_dir.clone();
+        crate::watchdog::step("procurando músicas novas");
+        self.as_mut().start_scan(&dir);
+        crate::watchdog::step("vigiando as pastas de música");
+        let d = dir.to_string();
+        self.as_mut().start_watching(&d);
+        crate::watchdog::step("integração com o GNOME (MPRIS, tema)");
+        self.as_mut().start_desktop_integration();
         // Remote catalogs are already cached; refresh them in the background
         // (the writer lock makes this wait for the local scan).
+        crate::watchdog::step("sincronizando servidores");
         self.as_mut().sync_servers(-1);
+        crate::watchdog::step("pronto");
+    }
+
+    pub fn heartbeat(&self, what: &QString) {
+        if what.is_empty() {
+            crate::watchdog::beat();
+        } else {
+            crate::watchdog::step(&what.to_string());
+        }
     }
 
     fn start_watching(mut self: Pin<&mut Self>, _dir: &str) {
@@ -596,13 +626,6 @@ impl qobject::Library {
     fn start_desktop_integration(mut self: Pin<&mut Self>) {
         // Appearance from the portal (falls back to gsettings already read at startup).
         if std::env::var("ARARA_DARK").is_err() {
-            let a = desktop::read_appearance();
-            if let Some(d) = a.dark {
-                self.as_mut().set_dark(d);
-            }
-            if let Some(hex) = a.accent_hex() {
-                self.as_mut().set_accent(qs(&hex));
-            }
             let qt = self.qt_thread();
             desktop::watch_appearance(move |a| {
                 let _ = qt.queue(move |mut o| {

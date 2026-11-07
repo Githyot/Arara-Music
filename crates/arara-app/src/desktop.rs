@@ -87,34 +87,49 @@ impl LyricsIface {
 }
 
 /// Holds a "don't suspend" request from the Inhibit portal; dropping it releases it.
+/// The portal calls run on a helper thread so the UI never waits on D-Bus.
 pub struct Inhibitor {
-    conn: Connection,
-    handle: zbus::zvariant::OwnedObjectPath,
+    stop: std::sync::mpsc::Sender<()>,
 }
 
 impl Inhibitor {
     pub fn start(reason: &str) -> Option<Self> {
-        let conn = Connection::session().ok()?;
-        let proxy = zbus::blocking::Proxy::new(
-            &conn,
-            "org.freedesktop.portal.Desktop",
-            "/org/freedesktop/portal/desktop",
-            "org.freedesktop.portal.Inhibit",
-        )
-        .ok()?;
-        let mut opts: HashMap<&str, Value> = HashMap::new();
-        opts.insert("reason", Value::from(reason));
-        // 4 = suspend
-        let handle: zbus::zvariant::OwnedObjectPath = proxy.call("Inhibit", &("", 4u32, opts)).ok()?;
-        Some(Self { conn, handle })
+        let (stop, rx) = std::sync::mpsc::channel::<()>();
+        let reason = reason.to_string();
+        std::thread::Builder::new()
+            .name("arara-inhibit".into())
+            .spawn(move || {
+                let held = (|| -> Option<(Connection, zbus::zvariant::OwnedObjectPath)> {
+                    let conn = Connection::session().ok()?;
+                    let proxy = zbus::blocking::Proxy::new(
+                        &conn,
+                        "org.freedesktop.portal.Desktop",
+                        "/org/freedesktop/portal/desktop",
+                        "org.freedesktop.portal.Inhibit",
+                    )
+                    .ok()?;
+                    let mut opts: HashMap<&str, Value> = HashMap::new();
+                    opts.insert("reason", Value::from(reason.as_str()));
+                    // 4 = suspend
+                    let handle: zbus::zvariant::OwnedObjectPath = proxy.call("Inhibit", &("", 4u32, opts)).ok()?;
+                    Some((conn, handle))
+                })();
+                // Wait until the Inhibitor is dropped (sender gone).
+                let _ = rx.recv();
+                if let Some((conn, handle)) = held {
+                    if let Ok(p) = zbus::blocking::Proxy::new(&conn, "org.freedesktop.portal.Desktop", handle.as_str(), "org.freedesktop.portal.Request") {
+                        let _: zbus::Result<()> = p.call("Close", &());
+                    }
+                }
+            })
+            .ok()?;
+        Some(Self { stop })
     }
 }
 
 impl Drop for Inhibitor {
     fn drop(&mut self) {
-        if let Ok(p) = zbus::blocking::Proxy::new(&self.conn, "org.freedesktop.portal.Desktop", self.handle.as_str(), "org.freedesktop.portal.Request") {
-            let _: zbus::Result<()> = p.call("Close", &());
-        }
+        let _ = self.stop.send(());
     }
 }
 
@@ -302,15 +317,86 @@ fn track_path(id: i64) -> String {
     format!("/io/github/arara/track/{id}")
 }
 
+/// MPRIS service. All D-Bus traffic runs on its own thread: the UI only drops
+/// messages in a channel, so a slow or stuck session bus (or a shell that holds
+/// the interface while reading it) can never freeze the window.
 pub struct Mpris {
-    conn: Connection,
+    tx: std::sync::mpsc::Sender<MprisMsg>,
     position: Arc<AtomicI64>,
+}
+
+enum MprisMsg {
+    Update { status: String, meta: Option<TrackMeta>, can_next: bool, can_prev: bool, volume: f64 },
+    Lyric { line: String, next: String, title: String, artist: String },
+    Rate(f64),
+    Seeked(i64),
 }
 
 impl Mpris {
     pub fn start(handler: impl Fn(Command) + Send + Sync + 'static) -> zbus::Result<Self> {
         let handler: Handler = Arc::new(handler);
         let position = Arc::new(AtomicI64::new(0));
+        let (tx, rx) = std::sync::mpsc::channel::<MprisMsg>();
+        let pos = position.clone();
+        std::thread::Builder::new()
+            .name("arara-mpris".into())
+            .spawn(move || {
+                let conn = match MprisConn::connect(handler, pos) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::warn!("MPRIS unavailable: {e}");
+                        for _ in rx {}
+                        return;
+                    }
+                };
+                for msg in rx {
+                    match msg {
+                        MprisMsg::Update { status, meta, can_next, can_prev, volume } => {
+                            conn.update(&status, meta, can_next, can_prev, volume)
+                        }
+                        MprisMsg::Lyric { line, next, title, artist } => conn.lyric_line(&line, &next, &title, &artist),
+                        MprisMsg::Rate(r) => conn.set_rate(r),
+                        MprisMsg::Seeked(us) => conn.seeked(us),
+                    }
+                }
+            })
+            .map_err(|e| zbus::Error::Failure(e.to_string()))?;
+        Ok(Self { tx, position })
+    }
+
+    /// Push the current state; emits PropertiesChanged only for what changed.
+    pub fn update(&self, status: &str, meta: Option<TrackMeta>, can_next: bool, can_prev: bool, volume: f64) {
+        let _ = self.tx.send(MprisMsg::Update { status: status.into(), meta, can_next, can_prev, volume });
+    }
+
+    /// Publish the lyric line being sung (empty when the track has no synced lyrics).
+    pub fn lyric_line(&self, line: &str, next: &str, title: &str, artist: &str) {
+        let _ = self.tx.send(MprisMsg::Lyric { line: line.into(), next: next.into(), title: title.into(), artist: artist.into() });
+    }
+
+    /// Current playback speed (1.0 = normal), shown by shells and widgets.
+    pub fn set_rate(&self, rate: f64) {
+        let _ = self.tx.send(MprisMsg::Rate(rate));
+    }
+
+    /// Position is polled by clients (not change-notified), so this is cheap to call often.
+    pub fn set_position(&self, us: i64) {
+        self.position.store(us, Ordering::Relaxed);
+    }
+
+    /// Call after a user-initiated jump so shells update their progress bar.
+    pub fn seeked(&self, us: i64) {
+        self.set_position(us);
+        let _ = self.tx.send(MprisMsg::Seeked(us));
+    }
+}
+
+struct MprisConn {
+    conn: Connection,
+}
+
+impl MprisConn {
+    fn connect(handler: Handler, position: Arc<AtomicI64>) -> zbus::Result<Self> {
         let conn = connection::Builder::session()?
             .name(format!("org.mpris.MediaPlayer2.arara.instance{}", std::process::id()))?
             .serve_at(PATH, Root { handler: handler.clone() })?
@@ -321,7 +407,7 @@ impl Mpris {
                     handler,
                     status: "Stopped".into(),
                     meta: None,
-                    position: position.clone(),
+                    position,
                     volume: 1.0,
                     rate: 1.0,
                     can_next: false,
@@ -329,11 +415,11 @@ impl Mpris {
                 },
             )?
             .build()?;
-        Ok(Self { conn, position })
+        Ok(Self { conn })
     }
 
     /// Push the current state; emits PropertiesChanged only for what changed.
-    pub fn update(&self, status: &str, meta: Option<TrackMeta>, can_next: bool, can_prev: bool, volume: f64) {
+    fn update(&self, status: &str, meta: Option<TrackMeta>, can_next: bool, can_prev: bool, volume: f64) {
         let Ok(iface) = self.conn.object_server().interface::<_, Player>(PATH) else { return };
         let ctx = iface.signal_context();
         let mut p = iface.get_mut();
@@ -362,7 +448,7 @@ impl Mpris {
     }
 
     /// Publish the lyric line being sung (empty when the track has no synced lyrics).
-    pub fn lyric_line(&self, line: &str, next: &str, title: &str, artist: &str) {
+    fn lyric_line(&self, line: &str, next: &str, title: &str, artist: &str) {
         let Ok(iface) = self.conn.object_server().interface::<_, LyricsIface>(LYRICS_PATH) else { return };
         let ctx = iface.signal_context();
         let mut l = iface.get_mut();
@@ -378,7 +464,7 @@ impl Mpris {
     }
 
     /// Current playback speed (1.0 = normal), shown by shells and widgets.
-    pub fn set_rate(&self, rate: f64) {
+    fn set_rate(&self, rate: f64) {
         let Ok(iface) = self.conn.object_server().interface::<_, Player>(PATH) else { return };
         let ctx = iface.signal_context();
         let mut p = iface.get_mut();
@@ -388,14 +474,8 @@ impl Mpris {
         }
     }
 
-    /// Position is polled by clients (not change-notified), so this is cheap to call often.
-    pub fn set_position(&self, us: i64) {
-        self.position.store(us, Ordering::Relaxed);
-    }
-
     /// Call after a user-initiated jump so shells update their progress bar.
-    pub fn seeked(&self, us: i64) {
-        self.set_position(us);
+    fn seeked(&self, us: i64) {
         if let Ok(iface) = self.conn.object_server().interface::<_, Player>(PATH) {
             let _ = zbus::block_on(Player::seeked(iface.signal_context(), us));
         }
@@ -482,6 +562,8 @@ pub fn watch_appearance(on_change: impl Fn(Appearance) + Send + 'static) {
             let Ok(p) = portal(&conn) else { return };
             let Ok(signals) = p.receive_signal("SettingChanged") else { return };
             let mut app = read_appearance();
+            // The first answer goes out right away; the UI starts with gsettings' guess.
+            on_change(app);
             for msg in signals {
                 let Ok((ns, key, v)) = msg.body().deserialize::<(String, String, OwnedValue)>() else { continue };
                 if ns == "org.freedesktop.appearance" {

@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.8
+Version:        0.7.9
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,14 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.9-1
+- Corrige o app que ficava rodando sem abrir a janela: a janela aparece antes
+  de varrer a biblioteca, falar com o GNOME (MPRIS, tema, inibir suspensão) e
+  restaurar a última música; nada disso roda mais na thread da interface
+- Ao fechar, o processo sai na hora (não fica um Arara invisível para trás)
+- Bancos vindos de versões antigas ganham a tabela de análise de transições
+- Se a interface travar, um relatório é salvo em ~/.cache/arara-music/travamentos
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.8-1
 - "Sobre o álbum" aparece direto na página do álbum, embaixo da capa e dos
   botões (ou embaixo das faixas em janelas estreitas)
