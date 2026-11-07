@@ -382,6 +382,24 @@ pub mod qobject {
         #[cxx_name = "onlineInfo"]
         fn online_info(self: Pin<&mut Library>, kind: QString, id: i64, json: QString);
 
+        /// Library items sharing a genre/tag ("Similares" page): artists,
+        /// albums and songs, local and from synced servers. `exclude_artist`
+        /// (-1 = none) is the artist whose chip was clicked.
+        #[qinvokable]
+        #[cxx_name = "tagJson"]
+        fn tag_json(self: &Library, tag: &QString, exclude_artist: i64) -> QString;
+
+        /// Artists with this tag on MusicBrainz (cached); answers with `tagOnline`.
+        /// `area` ("Brazil") puts artists from there first.
+        #[qinvokable]
+        #[cxx_name = "requestTagOnline"]
+        fn request_tag_online(self: Pin<&mut Library>, tag: &QString, area: &QString);
+
+        /// `json` is null when the lookup is off or failed.
+        #[qsignal]
+        #[cxx_name = "tagOnline"]
+        fn tag_online(self: Pin<&mut Library>, tag: QString, json: QString);
+
         /// Open the folder holding a local track in the file manager, with the file selected when possible.
         #[qinvokable]
         #[cxx_name = "showInFolder"]
@@ -1408,6 +1426,49 @@ impl qobject::Library {
             }
             let s = data.to_string();
             let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs(&s)));
+        });
+    }
+
+    pub fn tag_json(&self, tag: &QString, exclude_artist: i64) -> QString {
+        let Some(db) = &self.db else { return qs("null") };
+        let tag = tag.to_string();
+        let exclude = (exclude_artist >= 0).then_some(exclude_artist);
+        let Ok(m) = arara_core::similar::matches(db, &tag, exclude, 200) else { return qs("null") };
+        let artists = db.artists().unwrap_or_default();
+        let albums = db.albums().unwrap_or_default();
+        let artist_v: Vec<_> = m.artists.iter().filter_map(|(id, _)| artists.iter().find(|a| a.id == *id))
+            .take(30)
+            .map(|a| json!({ "id": a.id, "name": a.name, "albums": a.album_count, "cover": self.cover(&a.cover_hash, 256) }))
+            .collect();
+        let album_v: Vec<_> = m.albums.iter().filter_map(|(id, _)| albums.iter().find(|a| a.id == *id)).take(30).map(|a| self.album_value(a)).collect();
+        let mut tracks = db.tracks_by_ids(&m.tracks).unwrap_or_default();
+        tracks.sort_by_key(|t| m.tracks.iter().position(|i| *i == t.id));
+        let v = json!({
+            "tag": tag,
+            "artists": artist_v, "artistTotal": m.artists.len(),
+            "albums": album_v, "albumTotal": m.albums.len(),
+            "tracks": tracks.iter().map(|t| self.track_value(t)).collect::<Vec<_>>(), "trackTotal": m.track_total,
+        });
+        qs(&v.to_string())
+    }
+
+    pub fn request_tag_online(self: Pin<&mut Self>, tag: &QString, area: &QString) {
+        let tag = tag.to_string();
+        let area = area.to_string();
+        let qt = self.qt_thread();
+        if !self.online_allowed() || tag.trim().is_empty() {
+            let _ = qt.queue(move |o| o.tag_online(qs(&tag), qs("null")));
+            return;
+        }
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            let Ok(db) = Db::open(&db_path) else { return };
+            let key = format!("{tag}\u{1f}{area}");
+            let data = arara_core::info::cached_or_fetch(&db, "tag", &key, now(), false, || {
+                arara_core::similar::fetch_tag_artists(&tag, Some(&area))
+            });
+            let s = data.to_string();
+            let _ = qt.queue(move |o| o.tag_online(qs(&tag), qs(&s)));
         });
     }
 

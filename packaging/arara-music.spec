@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.10
+Version:        0.7.11
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,13 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.11-1
+- Gêneros do "Sobre o artista" e do álbum agora são clicáveis: abrem a
+  página "Similares" com artistas, álbuns e músicas daquele gênero (pastas
+  locais e servidores) e artistas para descobrir no MusicBrainz
+- Página do artista no mesmo formato da página do álbum: foto, nome e
+  "Sobre o artista" fixos à esquerda, álbuns à direita
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.10-1
 - Biblioteca em HD externo: o app não trava mais quando o disco está
   bloqueado, desconectado ou acabou de ser desbloqueado (as pastas são

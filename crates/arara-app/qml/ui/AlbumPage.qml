@@ -20,6 +20,7 @@ Flickable {
     signal openLink(string url)
     signal openFolder(string url)
     signal refreshAbout()
+    signal openTag(string tag)
 
     clip: true
     contentHeight: body.height + 48
@@ -91,6 +92,7 @@ Flickable {
             onOpenLink: (url) => page.openLink(url)
             onOpenFolder: (url) => page.openFolder(url)
             onRefreshOnline: page.refreshAbout()
+            onOpenTag: (tag) => page.openTag(tag)
         }
 
         Rectangle {

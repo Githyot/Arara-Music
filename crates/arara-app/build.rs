@@ -42,6 +42,8 @@ fn main() {
         "qml/ui/InfoSection.qml",
         "qml/ui/InfoPage.qml",
         "qml/ui/InfoBar.qml",
+        "qml/ui/ArtistPage.qml",
+        "qml/ui/TagPage.qml",
             "qml/ui/AddServerDialog.qml",
             "qml/ui/ServerPage.qml",
             "qml/ui/AppMenu.qml",

@@ -338,6 +338,21 @@ fn artist_type_pt(t: &str) -> &'static str {
     }
 }
 
+/// Lucene phrase for a MusicBrainz search query.
+pub fn mb_phrase(s: &str) -> String {
+    phrase(s)
+}
+
+/// MusicBrainz search (`artist`, `release-group`…), rate limited like the lookups.
+pub fn mb_search(entity: &str, query: &str, limit: u32) -> Option<Value> {
+    mb(&agent(), &format!("{entity}/?query={}&limit={limit}", enc(query)))
+}
+
+/// MusicBrainz artist type in Portuguese ("Group" → "Grupo").
+pub fn artist_type(t: &str) -> &'static str {
+    artist_type_pt(t)
+}
+
 /// Artist facts: type, country, active years, genres, Wikipedia bio and photo.
 pub fn fetch_artist(name: &str, mbid: Option<&str>) -> Option<Value> {
     let a = agent();
