@@ -173,7 +173,7 @@ Item {
         property bool rateDirty: true
         onSourceChanged: rateDirty = true
         // Once the new song is really running (position moves), the pipeline accepts the speed.
-        onPositionChanged: if (rateDirty && position > 0 && playbackState === MediaPlayer.PlayingState) { rateDirty = false; applyRate() }
+        onPositionChanged: if (d.rateDirty && d.position > 0 && d.playbackState === MediaPlayer.PlayingState) { d.rateDirty = false; d.applyRate() }
         function applyRate() {
             var r = Prefs.playbackRate
             if (Math.abs(r - 1) > 0.001 && Math.abs(playbackRate - r) < 0.001) playbackRate = 1

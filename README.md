@@ -15,6 +15,7 @@ Player de música para Linux em **Rust + Qt/QML**, com visual inspirado no GNOME
 - Servidores **Navidrome/Subsonic** e **Jellyfin** junto com as músicas locais; o catálogo fica em cache e abre na hora, até offline
 - Importa playlists e curtidas do **Apple Music** (Library.xml) e do **YouTube Music** (Google Takeout), além de CSV/M3U/XSPF, casando com as músicas que você tem
 - Normalização de volume (ReplayGain), volume lembrado, menu principal e janela adaptável a telas estreitas
+- Transições entre músicas: gapless, crossfade com curvas (suave, linear, S, DJ) e mixagem inteligente que pula silêncio, sobrepõe só os fades (como o MixRamp do MPD) e alinha na batida
 - Arrastar para reordenar fila e playlists; ordenação natural ("Artista 2" antes de "Artista 10")
 - Player à direita com abas Player / Fila / Letra, reprodução automática e tela de letra estilo karaokê
 - Rolagem rápida com índice A–Z; gêneros, anos, compositores, pastas e coleções

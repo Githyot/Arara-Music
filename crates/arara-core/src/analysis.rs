@@ -27,14 +27,14 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
 /// Bump when the algorithm changes, so old cached results are recomputed.
-pub const VERSION: i64 = 1;
+pub const VERSION: i64 = 2;
 
 /// Envelope resolution: one block = 10 ms.
 const BLOCK_MS: usize = 10;
 /// Below this a block counts as silence (dBFS RMS).
 const SILENCE_DB: f32 = -55.0;
 /// "Quiet part" threshold, relative to the track's typical loudness (MixRamp-like).
-const RAMP_REL_DB: f32 = -9.0;
+const RAMP_REL_DB: f32 = -6.0;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Analysis {
@@ -327,9 +327,14 @@ fn estimate_tempo(dbs: &[f32], first: usize, body_from: usize, body_to: usize) -
     let phase_abs = start as f64 + best_phase.0;
     let k = ((phase_abs - first as f64) / p).floor();
     let mut first_beat = phase_abs - k * p;
-    while first_beat < first as f64 {
+    // (a grid that lands just before the music starts means the start is the beat)
+    while first_beat < first as f64 - 0.25 * p {
         first_beat += p;
     }
+    if first_beat - p >= first as f64 - 0.25 * p {
+        first_beat -= p;
+    }
+    first_beat = first_beat.max(first as f64);
     Some((bpm, first_beat * BLOCK_MS as f64))
 }
 

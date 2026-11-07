@@ -359,6 +359,7 @@ Window {
         onEndOfMedia: player.next()
         onActiveLoaded: applyPendingSeek()
         onActiveStateChanged: {
+            if (!media) return
             if (media.playbackState === MediaPlayer.PlayingState) player.failures = 0
             applyPendingSeek(); mpris.push()
             library.setPlaying(media.playbackState === MediaPlayer.PlayingState)
@@ -369,6 +370,7 @@ Window {
         }
     }
     readonly property MediaPlayer media: decks.active
+    readonly property bool debugXf: Qt.application.arguments.indexOf("--debug-transitions") >= 0
     Connections { target: decks.active; function onSeekableChanged() { decks.applyPendingSeek() } }
 
     // ---------- transitions ----------
@@ -444,7 +446,9 @@ Window {
                 at = A.ramp_out_ms - head
                 var maxD = Math.min(Math.max(user * 1.5, 3000), cap)
                 if (endA - at > maxD) at = endA - maxD
-                if (endA - at < 1000) at = endA - 1000
+                // abrupt endings still get a short blend (half the chosen duration)
+                var minD = Math.min(maxD, Math.max(1000, user / 2))
+                if (endA - at < minD) at = endA - minD
                 // Beat alignment when the tempos match (or are double/half), within 4%.
                 if (win.prefs.xfbeat && A.bpm && B.bpm && A.beat_ms !== null && B.beat_ms !== null) {
                     var r = A.bpm / B.bpm
@@ -458,8 +462,7 @@ Window {
             }
             return { at: at, start: startB, dur: d, cut: true }
         }
-        property var current: null   // plan for current → next
-        property bool armed: false
+        property real nextAt: -1     // position where the next transition starts
         function tick() {
             var a = player.current, b = player.peekNext()
             if (!a) return
@@ -468,22 +471,24 @@ Window {
                 var left = (media.duration - media.position) / Math.max(0.25, Prefs.playbackRate)
                 if (media.duration > 0 && left < (win.prefs.xfdur * 1000 * 1.5 + 10000) && player.extendAutoplay()) b = player.peekNext()
             }
-            if (!b || decks.transitioning) return
+            if (!b || decks.transitioning) { nextAt = -1; return }
             want(a); want(b)
             var p = plan(a, b)
+            nextAt = p ? p.at : -1
             if (!p) return
             var rate = Math.max(0.25, Prefs.playbackRate)
             var wall = (p.at - media.position) / rate
             if (wall < 12000) decks.preload(b, p.start)
             if (media.position >= p.at && media.position > 500) {
+                if (win.debugXf) console.log("transição", a.title, "→", b.title, JSON.stringify(p), "pos", media.position, "análises", !!analyses[a.id], !!analyses[b.id])
                 decks.crossfade(b, p.start, p.dur, p.cut)
                 player.advanceMixed()
             }
         }
     }
     Timer {
-        // Faster near the transition point so gapless switches land within a few ms.
-        interval: xf.mode !== "off" && media.duration > 0 && media.duration - media.position < 3000 ? 15 : 200
+        // Faster near the transition point so switches land within a few ms.
+        interval: xf.nextAt > 0 && xf.nextAt - media.position < 1500 ? 15 : 200
         repeat: true
         running: xf.mode !== "off" && media.playbackState === MediaPlayer.PlayingState
         onTriggered: xf.tick()
@@ -1218,7 +1223,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.5",
+        onAbout: prompt.info("Arara Music 0.7.6",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     PreferencesDialog {

@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.5
+Version:        0.7.6
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,14 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.6-1
+- Transições entre músicas em Preferências > Reprodução: corte seco, sem
+  intervalo (gapless), crossfade com curvas e mixagem inteligente
+- Mixagem inteligente analisa o áudio (silêncio, fade-in/fade-out, loudness
+  EBU R128 e andamento) e pode alinhar a transição na batida
+- Crossfade curto ao pular música, fade ao pausar e retomar, álbuns sem
+  crossfade, volume medido para músicas sem ReplayGain
+
 * Fri Nov 06 2026 Arara Music <noreply@anthropic.com> - 0.7.5-1
 - Menu da música mais completo: favoritar, compartilhar, criar estação, ir
   para o álbum/artista, informações e créditos, ver/copiar/editar letra,
