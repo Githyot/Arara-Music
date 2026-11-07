@@ -118,3 +118,8 @@ pub fn watch_appearance(_on_change: impl Fn(Appearance) + Send + 'static) {}
 pub fn portal_pick(_title: &str, _directory: bool, _filters: &[(&str, &[&str])]) -> Result<Option<String>, String> {
     Err("sem portal no Windows".into())
 }
+
+/// Open Explorer with the file selected.
+pub fn show_in_folder(path: &str) -> bool {
+    std::process::Command::new("explorer").arg(format!("/select,{path}")).spawn().is_ok()
+}

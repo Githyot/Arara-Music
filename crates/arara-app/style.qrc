@@ -44,6 +44,14 @@
     <file alias="icons/shuffle.svg">qml/style/icons/shuffle.svg</file>
     <file alias="icons/songs.svg">qml/style/icons/songs.svg</file>
     <file alias="icons/star.svg">qml/style/icons/star.svg</file>
+    <file alias="icons/station.svg">qml/style/icons/station.svg</file>
+    <file alias="icons/web.svg">qml/style/icons/web.svg</file>
+    <file alias="icons/go-next.svg">qml/style/icons/go-next.svg</file>
+    <file alias="icons/mic.svg">qml/style/icons/mic.svg</file>
+    <file alias="icons/folder-open.svg">qml/style/icons/folder-open.svg</file>
+    <file alias="icons/copy.svg">qml/style/icons/copy.svg</file>
+    <file alias="icons/share.svg">qml/style/icons/share.svg</file>
+    <file alias="icons/info.svg">qml/style/icons/info.svg</file>
     <file alias="icons/trash.svg">qml/style/icons/trash.svg</file>
     <file alias="icons/undo.svg">qml/style/icons/undo.svg</file>
     <file alias="icons/unstar.svg">qml/style/icons/unstar.svg</file>

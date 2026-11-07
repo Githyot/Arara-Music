@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.4
+Version:        0.7.5
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,16 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Fri Nov 06 2026 Arara Music <noreply@anthropic.com> - 0.7.5-1
+- Menu da música mais completo: favoritar, compartilhar, criar estação, ir
+  para o álbum/artista, informações e créditos, ver/copiar/editar letra,
+  mostrar na pasta
+- Página de informações da música com créditos (tags + MusicBrainz), samples,
+  detalhes, estatísticas da biblioteca e dados do arquivo
+- Barra "Sobre" para artistas e álbuns: foto e resumo da Wikipédia, dados do
+  MusicBrainz, músicas mais tocadas, "Aparece em" e números da biblioteca
+- Busca online pode ser desligada em Preferências > Biblioteca
+
 * Fri Nov 06 2026 Arara Music <noreply@anthropic.com> - 0.7.4-1
 - Velocidade de reprodução de 0,25x a 2x, em passos de 0,01 (botão entre os
   tempos do player, atalhos [ ] e \\, roda do mouse, MPRIS Rate)

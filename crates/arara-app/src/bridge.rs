@@ -298,6 +298,43 @@ pub mod qobject {
         #[cxx_name = "lyricsReady"]
         fn lyrics_ready(self: Pin<&mut Library>, track_id: i64, json: QString);
 
+        /// Everything about one song for its info page: library data (plays,
+        /// dates, numbers) plus what the file's tags say (credits, label, audio).
+        #[qinvokable]
+        #[cxx_name = "trackInfoJson"]
+        fn track_info_json(self: &Library, track_id: i64) -> QString;
+
+        /// Album summary from the library: length, genres, plays, quality, tags.
+        #[qinvokable]
+        #[cxx_name = "albumInfoJson"]
+        fn album_info_json(self: &Library, album_id: i64) -> QString;
+
+        /// Artist summary from the library: counts, years, genres, top songs.
+        #[qinvokable]
+        #[cxx_name = "artistInfoJson"]
+        fn artist_info_json(self: &Library, artist_id: i64) -> QString;
+
+        /// Look the item up on MusicBrainz/Wikipedia (cached); answers with
+        /// `onlineInfo`. kind: "track" | "album" | "artist".
+        #[qinvokable]
+        #[cxx_name = "requestOnlineInfo"]
+        fn request_online_info(self: Pin<&mut Library>, kind: &QString, id: i64, force: bool);
+
+        /// `json` is null when nothing was found or the lookup is off.
+        #[qsignal]
+        #[cxx_name = "onlineInfo"]
+        fn online_info(self: Pin<&mut Library>, kind: QString, id: i64, json: QString);
+
+        /// Open the folder holding a local track in the file manager, with the file selected when possible.
+        #[qinvokable]
+        #[cxx_name = "showInFolder"]
+        fn show_in_folder(self: &Library, track_id: i64) -> bool;
+
+        /// Plain text of the stored lyrics ("" when none), for sharing.
+        #[qinvokable]
+        #[cxx_name = "lyricsText"]
+        fn lyrics_text(self: &Library, track_id: i64) -> QString;
+
         /// Search Jamendo + Internet Archive (open licences only); answers with `freeResults`.
         #[qinvokable]
         #[cxx_name = "searchFree"]
@@ -444,6 +481,10 @@ fn lyrics_to_json(res: lyrics::Lyrics) -> String {
         lyrics::Lyrics::None => json!({ "kind": "none" }),
     }
     .to_string()
+}
+
+fn rusqlite_params<'a>(id: i64, name: &'a str, like: &'a str) -> (i64, &'a str, &'a str) {
+    (id, name, like)
 }
 
 fn now() -> i64 {
@@ -942,6 +983,230 @@ impl qobject::Library {
             let _ = db.conn.execute("DELETE FROM lyrics WHERE track_id=?1", [track_id]);
         }
         self.request_lyrics(track_id);
+    }
+
+    // ---------- info pages ----------
+
+    fn file_url_of(path: &str) -> String {
+        remote::file_url(path)
+    }
+
+    pub fn track_info_json(&self, track_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("null") };
+        let Ok(Some(t)) = db.track(track_id) else { return qs("null") };
+        let mut v = self.track_value(&t);
+        let extra = db.conn.query_row(
+            "SELECT track_no, disc_no, play_count, last_played, added_at, composer, size FROM tracks WHERE id = ?1",
+            [track_id],
+            |r| Ok(json!({
+                "trackNo": r.get::<_, Option<i64>>(0)?, "discNo": r.get::<_, Option<i64>>(1)?,
+                "plays": r.get::<_, i64>(2)?, "lastPlayed": r.get::<_, Option<i64>>(3)?,
+                "addedAt": r.get::<_, Option<i64>>(4)?, "composer": r.get::<_, Option<String>>(5)?,
+                "size": r.get::<_, i64>(6)?,
+            })),
+        ).unwrap_or(json!({}));
+        if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
+            for (k, x) in e {
+                o.insert(k.clone(), x.clone());
+            }
+        }
+        let local = !remote::is_remote(&t.path);
+        v["albumArtist"] = json!(t.album_artist);
+        v["local"] = json!(local);
+        v["path"] = json!(if local { t.path.clone() } else { String::new() });
+        v["folderUrl"] = json!(if local {
+            std::path::Path::new(&t.path).parent().map(|p| Self::file_url_of(&p.to_string_lossy())).unwrap_or_default()
+        } else {
+            String::new()
+        });
+        v["hasLyrics"] = json!(db.cached_lyrics(track_id).ok().flatten().map(|(src, a, b)| src != "none" && (a.is_some() || b.is_some())).unwrap_or(false));
+        v["file"] = if local { arara_core::info::file_details(&t.path) } else { json!({}) };
+        qs(&v.to_string())
+    }
+
+    pub fn album_info_json(&self, album_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("null") };
+        let tracks = db.album_tracks(album_id).unwrap_or_default();
+        let stats = db.conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(duration_ms),0), COALESCE(SUM(play_count),0), MIN(added_at), MAX(last_played),
+                    COUNT(DISTINCT COALESCE(disc_no,1)), GROUP_CONCAT(DISTINCT composer)
+             FROM tracks WHERE album_id = ?1",
+            [album_id],
+            |r| Ok(json!({
+                "tracks": r.get::<_, i64>(0)?, "durationMs": r.get::<_, i64>(1)?, "plays": r.get::<_, i64>(2)?,
+                "addedAt": r.get::<_, Option<i64>>(3)?, "lastPlayed": r.get::<_, Option<i64>>(4)?,
+                "discs": r.get::<_, i64>(5)?, "composers": r.get::<_, Option<String>>(6)?,
+            })),
+        ).unwrap_or(json!({}));
+        let mut genres: Vec<String> = vec![];
+        for t in &tracks {
+            if let Some(g) = &t.genre {
+                if !genres.contains(g) {
+                    genres.push(g.clone());
+                }
+            }
+        }
+        let mut grades: Vec<String> = vec![];
+        for t in &tracks {
+            let d = t.quality().1;
+            if !d.is_empty() && !grades.contains(&d) {
+                grades.push(d);
+            }
+        }
+        let best = tracks.iter().map(|t| t.quality().0).find(|g| *g == "Hi-Res").or_else(|| tracks.iter().map(|t| t.quality().0).find(|g| !g.is_empty())).unwrap_or("");
+        // Label, copyright and release date usually live in every track's tags: read the first local one.
+        let file = tracks.iter().find(|t| !remote::is_remote(&t.path)).map(|t| arara_core::info::file_details(&t.path)).unwrap_or(json!({}));
+        let composers: Vec<String> = stats["composers"].as_str().unwrap_or("").split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).take(8).collect();
+        let first = tracks.first();
+        let folder = first.filter(|t| !remote::is_remote(&t.path)).and_then(|t| std::path::Path::new(&t.path).parent().map(|p| p.to_string_lossy().into_owned())).unwrap_or_default();
+        let v = json!({
+            "stats": stats, "genres": genres, "qualities": grades, "grade": best, "composers": composers,
+            "fields": file["fields"], "mbid": file["mbid"], "folder": folder,
+            "folderUrl": if folder.is_empty() { String::new() } else { Self::file_url_of(&folder) },
+            "year": first.and_then(|t| t.year),
+        });
+        qs(&v.to_string())
+    }
+
+    pub fn artist_info_json(&self, artist_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("null") };
+        let name: String = db.conn.query_row("SELECT name FROM artists WHERE id = ?1", [artist_id], |r| r.get(0)).unwrap_or_default();
+        // Songs credited to the artist: on their albums, or as track artist ("feat." included).
+        let like = format!("%{}%", name.replace('%', "").replace('_', ""));
+        let cond = "(a.artist_id = ?1 OR t.artist = ?2 COLLATE NOCASE OR t.artist LIKE ?3)";
+        let stats = db.conn.query_row(
+            &format!("SELECT COUNT(*), COALESCE(SUM(t.duration_ms),0), COALESCE(SUM(t.play_count),0), MIN(COALESCE(t.year,a.year)), MAX(COALESCE(t.year,a.year)),
+                    MAX(t.last_played), SUM(t.starred)
+             FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE {cond}"),
+            rusqlite_params(artist_id, &name, &like),
+            |r| Ok(json!({
+                "tracks": r.get::<_, i64>(0)?, "durationMs": r.get::<_, i64>(1)?, "plays": r.get::<_, i64>(2)?,
+                "firstYear": r.get::<_, Option<i64>>(3)?, "lastYear": r.get::<_, Option<i64>>(4)?,
+                "lastPlayed": r.get::<_, Option<i64>>(5)?, "starred": r.get::<_, Option<i64>>(6)?.unwrap_or(0),
+            })),
+        ).unwrap_or(json!({}));
+        let mut genres: Vec<(String, i64)> = vec![];
+        if let Ok(mut st) = db.conn.prepare(&format!(
+            "SELECT t.genre, COUNT(*) c FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE {cond} AND t.genre IS NOT NULL GROUP BY t.genre COLLATE NOCASE ORDER BY c DESC LIMIT 5"
+        )) {
+            if let Ok(rows) = st.query_map(rusqlite_params(artist_id, &name, &like), |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))) {
+                genres = rows.flatten().collect();
+            }
+        }
+        let mut top_ids: Vec<i64> = vec![];
+        if let Ok(mut st) = db.conn.prepare(&format!(
+            "SELECT t.id FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE {cond}
+             ORDER BY t.play_count DESC, t.starred DESC, t.last_played DESC, COALESCE(t.year,a.year) DESC LIMIT 5"
+        )) {
+            if let Ok(rows) = st.query_map(rusqlite_params(artist_id, &name, &like), |r| r.get::<_, i64>(0)) {
+                top_ids = rows.flatten().collect();
+            }
+        }
+        let mut top = db.tracks_by_ids(&top_ids).unwrap_or_default();
+        top.sort_by_key(|t| top_ids.iter().position(|i| *i == t.id));
+        // Albums by other artists where this one shows up on some track.
+        let mut appears: Vec<serde_json::Value> = vec![];
+        if let Ok(mut st) = db.conn.prepare(
+            "SELECT DISTINCT a.id FROM tracks t JOIN albums a ON a.id = t.album_id
+             WHERE (a.artist_id IS NULL OR a.artist_id != ?1) AND (t.artist = ?2 COLLATE NOCASE OR t.artist LIKE ?3) LIMIT 12",
+        ) {
+            let ids: Vec<i64> = st.query_map(rusqlite_params(artist_id, &name, &like), |r| r.get(0)).map(|r| r.flatten().collect()).unwrap_or_default();
+            let all = db.albums().unwrap_or_default();
+            appears = all.iter().filter(|a| ids.contains(&a.id)).map(|a| self.album_value(a)).collect();
+        }
+        // Artist MBID from the tags of one of their files, when tagged by Picard.
+        let mbid = top.iter().find(|t| !remote::is_remote(&t.path)).and_then(|t| arara_core::info::file_details(&t.path)["mbid"]["artist"].as_str().map(str::to_owned));
+        let v = json!({
+            "name": name, "stats": stats,
+            "genres": genres.iter().map(|g| g.0.clone()).collect::<Vec<_>>(),
+            "top": top.iter().map(|t| self.track_value(t)).collect::<Vec<_>>(),
+            "appearsOn": appears, "mbid": mbid,
+        });
+        qs(&v.to_string())
+    }
+
+    fn online_allowed(&self) -> bool {
+        std::env::var("ARARA_OFFLINE").is_err()
+            && self.db.as_ref().and_then(|d| d.get_kv("pref:onlineinfo").ok().flatten()).map_or(true, |v| v != "0")
+    }
+
+    pub fn request_online_info(self: Pin<&mut Self>, kind: &QString, id: i64, force: bool) {
+        let kind = kind.to_string();
+        let qt = self.qt_thread();
+        if !self.online_allowed() {
+            let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs("null")));
+            return;
+        }
+        let Some(db) = &self.db else { return };
+        // Gather what to search for now (cheap), fetch on a worker thread.
+        enum Job {
+            Track { title: String, artist: String, album: Option<String>, dur: i64, mbid: Option<String> },
+            Album { title: String, artist: String, mbid: Option<String> },
+            Artist { name: String, mbid: Option<String> },
+        }
+        let job = match kind.as_str() {
+            "track" => db.track(id).ok().flatten().map(|t| {
+                let mbid = (!remote::is_remote(&t.path)).then(|| arara_core::info::file_details(&t.path)["mbid"]["recording"].as_str().map(str::to_owned)).flatten();
+                Job::Track { title: t.title, artist: t.artist, album: t.album, dur: t.duration_ms, mbid }
+            }),
+            "album" => db.albums().ok().and_then(|all| all.into_iter().find(|a| a.id == id)).map(|a| {
+                let first = db.album_tracks(id).ok().and_then(|ts| ts.into_iter().find(|t| !remote::is_remote(&t.path)));
+                let mbid = first.and_then(|t| arara_core::info::file_details(&t.path)["mbid"]["release"].as_str().map(str::to_owned));
+                Job::Album { title: a.title, artist: a.artist.unwrap_or_default(), mbid }
+            }),
+            "artist" => {
+                let name: Option<String> = db.conn.query_row("SELECT name FROM artists WHERE id = ?1", [id], |r| r.get(0)).ok();
+                name.map(|n| Job::Artist { name: n, mbid: None })
+            }
+            _ => None,
+        };
+        let Some(job) = job else {
+            let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs("null")));
+            return;
+        };
+        let db_path = self.db_path.clone();
+        let covers = self.covers_dir.join("web");
+        std::thread::spawn(move || {
+            use arara_core::info;
+            let Ok(db) = Db::open(&db_path) else { return };
+            let mut data = match job {
+                Job::Track { title, artist, album, dur, mbid } => {
+                    let key = format!("{artist}\u{1f}{title}\u{1f}{}", album.clone().unwrap_or_default());
+                    info::cached_or_fetch(&db, "track", &key, now(), force, || info::fetch_recording(&title, &artist, album.as_deref(), dur, mbid.as_deref()))
+                }
+                Job::Album { title, artist, mbid } => {
+                    let key = format!("{artist}\u{1f}{title}");
+                    info::cached_or_fetch(&db, "album", &key, now(), force, || info::fetch_album(&title, &artist, mbid.as_deref()))
+                }
+                Job::Artist { name, mbid } => info::cached_or_fetch(&db, "artist", &name, now(), force, || info::fetch_artist(&name, mbid.as_deref())),
+            };
+            // Wikipedia photo → local file, so QML loads it from disk like covers.
+            if let Some(img) = data["wiki"]["image"].as_str().map(str::to_owned) {
+                if let Some(p) = info::cache_image(&img, &covers) {
+                    data["photo"] = json!(remote::file_url(&p));
+                }
+            }
+            let s = data.to_string();
+            let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs(&s)));
+        });
+    }
+
+    pub fn show_in_folder(&self, track_id: i64) -> bool {
+        let Some(db) = &self.db else { return false };
+        let Ok(Some(t)) = db.track(track_id) else { return false };
+        if remote::is_remote(&t.path) {
+            return false;
+        }
+        desktop::show_in_folder(&t.path)
+    }
+
+    pub fn lyrics_text(&self, track_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("") };
+        match db.cached_lyrics(track_id).ok().flatten() {
+            Some((_, Some(synced), _)) => qs(&lyrics::lrc_to_plain(&synced)),
+            Some((_, None, Some(plain))) => qs(&plain),
+            _ => qs(""),
+        }
     }
 
     pub fn request_lyrics(self: Pin<&mut Self>, track_id: i64) {

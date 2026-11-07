@@ -561,3 +561,24 @@ pub fn portal_pick(title: &str, directory: bool, filters: &[(&str, &[&str])]) ->
     };
     Ok(first.map(|u| percent_decode(u.strip_prefix("file://").unwrap_or(&u))))
 }
+
+/// Show a file in the file manager (FileManager1 D-Bus, which selects it in
+/// Nautilus/Dolphin), falling back to opening its folder.
+pub fn show_in_folder(path: &str) -> bool {
+    let uri = arara_core::remote::file_url(path);
+    let ok = zbus::blocking::Connection::session()
+        .and_then(|c| {
+            c.call_method(
+                Some("org.freedesktop.FileManager1"),
+                "/org/freedesktop/FileManager1",
+                Some("org.freedesktop.FileManager1"),
+                "ShowItems",
+                &(vec![uri.as_str()], ""),
+            )
+        })
+        .is_ok();
+    ok || std::path::Path::new(path)
+        .parent()
+        .map(|d| std::process::Command::new("xdg-open").arg(d).spawn().is_ok())
+        .unwrap_or(false)
+}

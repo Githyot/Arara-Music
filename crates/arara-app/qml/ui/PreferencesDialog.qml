@@ -327,6 +327,16 @@ Item {
                     // ======== Biblioteca ========
                     Group {
                         visible: dlg.page === "library"
+                        title: "Informações"
+                        SwitchRow {
+                            title: "Buscar informações online"
+                            subtitle: "Créditos, biografia e foto dos artistas e dados dos álbuns no MusicBrainz e na Wikipédia. Só o nome da música, do álbum ou do artista é enviado"
+                            checked: dlg.get("onlineinfo")
+                            onToggled: dlg.set("onlineinfo", !checked)
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "library"
                         title: "Arquivos"
                         ButtonRow {
                             title: "Pastas de música"

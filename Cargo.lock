@@ -87,7 +87,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "arara-app"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "arara-core",
  "cxx",
@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "arara-cli"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "arara-core",
  "env_logger",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "arara-core"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "blake3",
  "crossbeam-channel",

@@ -34,7 +34,7 @@ Window {
         tilesize: "medium", fontscale: 1.0, compact: false, reducemotion: false,
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
         autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
-        explicit: true, explicitlyrics: true, rate: 1.0,
+        explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true,
         hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close"
     })
     property var prefs: prefDefaults
@@ -395,19 +395,20 @@ Window {
         property var server: null
         property var history: []
         property var group: null          // {kind, name} of the open genre/year/composer/folder
+        property var trackInfo: null      // track whose info page is open
         // Sub-pages always get a back button, even when reached with no history.
-        readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group"
+        readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group" || page === "trackinfo"
         // Sidebar entry the current view belongs to (an album opened from a server keeps "server").
         property string section: "albums"
 
         // Snapshot of the current view, taken before a navigation changes it.
         function state() {
-            return { page: page, section: section, album: album, artist: artist, playlist: playlist, server: server, group: group,
+            return { page: page, section: section, album: album, artist: artist, playlist: playlist, server: server, group: group, trackInfo: trackInfo,
                      groupQuery: catSongs.baseFilter, groupTitle: catSongs.heading, groupSort: catSongs.sort }
         }
         function go(p, st) {
             // Reassign (not push) so bindings on history.length, like the back button, update.
-            if (p !== page || p === "group" || p === "album" || p === "artist") history = history.concat([st || state()])
+            if (p !== page || p === "group" || p === "album" || p === "artist" || p === "trackinfo") history = history.concat([st || state()])
             page = p; if (p === "songs") section = "songs"
             refresh()
             if (p === "songs") search.forceActiveFocus(); else if (search.activeFocus && search.text === "") win.contentItem.forceActiveFocus()
@@ -417,13 +418,15 @@ Window {
             history = history.slice(0, -1)
             if (!h) {
                 // No history (e.g. restored state): go up to the parent listing.
-                root(page === "group" && group ? group.kind : page === "artist" ? "artists" : page === "album" && section !== "album" ? section : "albums")
+                root(page === "group" && group ? group.kind : page === "artist" ? "artists" : page === "trackinfo" ? "songs" : page === "album" && section !== "album" ? section : "albums")
                 return
             }
             win.lyricsMode = false
             if ((h.page === "group" || h.page === "added") && h.groupQuery !== undefined) catSongs.open(h.groupQuery, h.groupTitle, h.groupSort)
             if (h.page === "album" && h.album) { albumPage.tracks = JSON.parse(library.albumTracksJson(h.album.id)) }
             if (h.page === "artist" && h.artist) { artistAlbums.albums = JSON.parse(library.artistAlbumsJson(h.artist.id)) }
+            if (h.page === "trackinfo" && h.trackInfo) win.loadTrackInfo(h.trackInfo)
+            trackInfo = h.trackInfo || null
             page = h.page; section = h.section || h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; group = h.group || null; refresh()
         }
         function root(p) {
@@ -453,6 +456,7 @@ Window {
             var a = artistGrid.artists.find(function (x) { return x.id === id })
             if (a) openArtist(a)
         }
+        function openTrackInfo(t) { var st = state(); win.lyricsMode = false; win.loadTrackInfo(t); trackInfo = t; infoPage.contentY = 0; go("trackinfo", st) }
         function openPlaylist(p) { var st = state(); playlist = p; go("playlist", st) }
         function openServer(s) { var st = state(); server = s; go("server", st) }
         function refresh() {
@@ -486,6 +490,7 @@ Window {
             : page === "group" && group ? group.name
             : page === "playlist" ? "Playlist"
             : page === "server" ? "Servidor"
+            : page === "trackinfo" ? "Informações"
             : page === "songs" ? "Músicas" : page === "free" ? "" : "Álbuns"
     }
 
@@ -498,10 +503,66 @@ Window {
     function goToArtistOf(t) {
         if (!t) return
         var arts = artistGrid.artists
-        var ar = arts.find(function (x) { return x.name === t.artist })
+        var ar = artistByName(t.artist)
         if (!ar) { var a = albumOf(t); if (a && a.artistId) ar = arts.find(function (x) { return x.id === a.artistId }) }
         if (ar) { win.lyricsMode = false; nav.openArtist(ar) } else toast.show("Artista não encontrado na biblioteca")
     }
+    // ---------- info pages ----------
+    property bool infoBarOpen: false
+    property string infoKey: ""          // "<kind>:<id>" the bar currently shows
+    function loadTrackInfo(t) {
+        infoPage.info = JSON.parse(library.trackInfoJson(t.id))
+        infoPage.online = null; infoPage.loading = true
+        library.requestOnlineInfo("track", t.id, false)
+    }
+    function infoSubject() { return nav.page === "artist" ? nav.artist : nav.page === "album" ? nav.album : null }
+    function loadInfoBar(force) {
+        var subj = infoSubject()
+        if (!win.infoBarOpen || !subj) return
+        var kind = nav.page, key = kind + ":" + subj.id
+        if (key === win.infoKey && !force) return
+        win.infoKey = key
+        infoBar.kind = kind; infoBar.subject = subj
+        infoBar.info = JSON.parse(kind === "artist" ? library.artistInfoJson(subj.id) : library.albumInfoJson(subj.id))
+        infoBar.online = null
+        infoBar.onlineOff = !win.prefs.onlineinfo
+        infoBar.loading = win.prefs.onlineinfo
+        library.requestOnlineInfo(kind, subj.id, !!force)
+    }
+    function toggleInfoBar() { win.infoBarOpen = !win.infoBarOpen; win.infoKey = ""; loadInfoBar(false) }
+    Connections { target: nav; function onPageChanged() { win.loadInfoBar(false) } function onArtistChanged() { win.loadInfoBar(false) } function onAlbumChanged() { win.loadInfoBar(false) } }
+    Connections {
+        target: library
+        function onOnlineInfo(kind, id, json) {
+            var data = JSON.parse(json); id = Number(id)
+            if (kind === "track" && infoPage.info && infoPage.info.id === id) { infoPage.online = data; infoPage.loading = false }
+            if ((kind === "artist" || kind === "album") && win.infoKey === kind + ":" + id) { infoBar.online = data; infoBar.loading = false }
+        }
+    }
+    // Exact name first, then the main artist of "A feat. B" / "A & B".
+    function artistByName(name) {
+        var n = String(name || "").toLowerCase()
+        var hit = artistGrid.artists.find(function (x) { return x.name.toLowerCase() === n })
+        if (hit) return hit
+        var main = n.split(/\s+(?:feat\.?|ft\.|featuring|part\.|com|&|e|x)\s+|,\s*/)[0].trim()
+        return artistGrid.artists.find(function (x) { return x.name.toLowerCase() === main })
+    }
+    function openArtistNamed(name) {
+        var ar = artistByName(name)
+        if (ar) { win.lyricsMode = false; nav.openArtist(ar) } else toast.show("“" + name + "” não está na sua biblioteca")
+    }
+    function copyText(text, msg) { clip.text = text; clip.selectAll(); clip.copy(); clip.text = ""; toast.show(msg) }
+    function showLyricsOf(t) {
+        if (!player.current) player.playList([t], 0)
+        else if (player.current.id !== t.id) { var q = player.queue.slice(); q.splice(player.index + 1, 0, t); player.queue = q; player.next() }
+        win.lyricsMode = true
+    }
+    function startStation(t) {
+        var more = JSON.parse(library.autoplayJson(t.id, JSON.stringify([t.id]), 40))
+        player.playList([t].concat(more), 0)
+        toast.show("Estação de “" + t.title + "”: " + (more.length + 1) + " músicas")
+    }
+    TextEdit { id: clip; visible: false }
     function setVolume(v) { win.userVolume = v; volumeSave.restart(); mpris.push() }
     function saveSmart(q, sort, suggested) {
         prompt.ask("Salvar como playlist inteligente", "Ela se atualiza sozinha com as músicas que combinam com “" + q + "”.", suggested, "Salvar", function (name) {
@@ -617,9 +678,26 @@ Window {
             }
             Timer { id: searchTimer; interval: 120; onTriggered: songs.search(search.text) }
 
+            readonly property bool infoBarShown: win.infoBarOpen && (nav.page === "artist" || nav.page === "album") && !win.lyricsMode
+            readonly property bool infoBarOverlay: content.width < 700
+            InfoBar {
+                id: infoBar
+                z: 6
+                anchors { right: parent.right; top: header.bottom; bottom: parent.bottom }
+                width: content.infoBarOverlay ? content.width : Math.min(360, Math.max(300, content.width * 0.4))
+                visible: content.infoBarShown
+                playingId: player.current ? player.current.id : -1
+                onCloseRequested: { win.infoBarOpen = false; win.infoKey = "" }
+                onPlayTracks: (t, i) => player.playList(t, i)
+                onOpenAlbum: (a) => nav.openAlbum(a)
+                onOpenLink: (url) => Qt.openUrlExternally(url)
+                onOpenFolder: (url) => Qt.openUrlExternally(url)
+                onRefreshOnline: win.loadInfoBar(true)
+            }
             Item {
                 id: stack
-                anchors { left: parent.left; right: parent.right; top: header.bottom; bottom: parent.bottom }
+                anchors { left: parent.left; right: parent.right; top: header.bottom; bottom: parent.bottom
+                          rightMargin: content.infoBarShown && !content.infoBarOverlay ? infoBar.width : 0 }
                 // Each page change fades the new page in and lifts it a little.
                 transform: Translate { id: stackLift }
                 Connections {
@@ -680,6 +758,10 @@ Window {
                                         player.playList(t, 0)
                                     }
                                 }
+                                FlatButton {
+                                    icon: "info"; tip: "Sobre o artista"; color: win.infoBarOpen ? Theme.selected : Theme.hover
+                                    onClicked: win.toggleInfoBar()
+                                }
                             }
                         }
                     }
@@ -699,6 +781,24 @@ Window {
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onOpenArtist: (id) => nav.openArtistById(id)
+                    infoOpen: win.infoBarOpen
+                    onInfoRequested: win.toggleInfoBar()
+                }
+                InfoPage {
+                    id: infoPage
+                    anchors.fill: parent
+                    visible: nav.page === "trackinfo"
+                    playing: !!player.current && !!infoPage.info && player.current.id === infoPage.info.id
+                    onPlay: (t) => { if (!infoPage.playing) player.playList([t], 0) }
+                    knownArtists: artistGrid.artists.map(function (a) { return a.name.toLowerCase() })
+                    onOpenLyrics: (t) => win.showLyricsOf(t)
+                    onOpenAlbum: (t) => nav.openAlbumById(t.albumId)
+                    onOpenArtistByName: (name) => win.openArtistNamed(name)
+                    onStarToggled: (t, s) => win.onStar(t, s)
+                    onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
+                    onShowInFolder: (t) => { if (!library.showInFolder(t.id)) toast.show("Não foi possível abrir a pasta") }
+                    onRefreshOnline: (t) => { infoPage.loading = true; library.requestOnlineInfo("track", t.id, true) }
+                    onOpenLink: (url) => Qt.openUrlExternally(url)
                 }
                 ServerPage {
                     id: serverPage
@@ -948,6 +1048,23 @@ Window {
             toast.show("Playlist “" + name + "” criada")
         })
         onGoToAlbum: (t) => { win.lyricsMode = false; nav.openAlbumById(t.albumId) }
+        onGoToArtist: (t) => win.goToArtistOf(t)
+        onToggleStar: (t) => { win.onStar(t, !t.starred); toast.show(t.starred ? "Adicionada às favoritas" : "Tirada das favoritas") }
+        onShare: (t) => win.copyText(t.title + " — " + t.artist + (t.album ? " (" + t.album + ")" : ""), "Título e artista copiados")
+        onStartStation: (t) => win.startStation(t)
+        onShowInfo: (t) => nav.openTrackInfo(t)
+        onShowLyrics: (t) => win.showLyricsOf(t)
+        onCopyLyrics: (t) => {
+            var txt = library.lyricsText(t.id)
+            if (txt) win.copyText(t.title + " — " + t.artist + "\n\n" + txt, "Letra copiada")
+            else toast.show("A letra desta música ainda não foi baixada")
+        }
+        onEditLyrics: (t) => {
+            var cur = player.current && player.current.id === t.id
+            var txt = library.lyricsText(t.id)
+            lyricsEditor.openWith(t, cur ? win.lyrics : txt ? { kind: "plain", text: txt } : { kind: "none" })
+        }
+        onShowInFolder: (t) => { if (!library.showInFolder(t.id)) toast.show("Não foi possível abrir a pasta") }
     }
     TextPrompt { id: prompt }
     Timer { id: volumeSave; interval: 600; onTriggered: library.setSetting("volume", String(win.userVolume)) }
@@ -964,7 +1081,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.4",
+        onAbout: prompt.info("Arara Music 0.7.5",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     PreferencesDialog {

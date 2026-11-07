@@ -12,11 +12,13 @@ Flickable {
     signal menuRequested(var track, real x, real y)
     signal starToggled(var track, bool starred)
     signal openArtist(int artistId)
+    signal infoRequested()
+    property bool infoOpen: false
 
     clip: true
     contentHeight: body.height + 48
     boundsBehavior: Flickable.StopAtBounds
-    readonly property bool wide: width > 760
+    readonly property bool wide: width > 700
 
     Item {
         id: body
@@ -62,6 +64,10 @@ Flickable {
                         for (var i = t.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = t[i]; t[i] = t[j]; t[j] = x }
                         page.play(t, 0)
                     }
+                }
+                FlatButton {
+                    icon: "info"; tip: "Sobre o álbum"; color: page.infoOpen ? Theme.selected : Theme.hover
+                    onClicked: page.infoRequested()
                 }
             }
         }
