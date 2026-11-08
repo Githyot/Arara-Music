@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.20
+Version:        0.7.21
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,12 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.21-1
+- Versão única que junta tudo desde a 0.7.12: editar informações da música
+  (0.7.13), sem Música livre (0.7.14), sombra da capa (0.7.15), links e
+  botão anterior na tela da letra (0.7.17), Reproduzir/Aleatório na busca e
+  em todas as músicas (0.7.19) e a página Início (0.7.20)
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.20-1
 - Nova página Início, primeira da barra lateral e aberta ao iniciar: botão
   grande "Tocar tudo aleatório" (e "Favoritas aleatórias"), álbuns ouvidos
