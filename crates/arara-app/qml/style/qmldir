@@ -5,3 +5,4 @@ singleton Prefs 1.0 Prefs.qml
 Toggle 1.0 Toggle.qml
 ThemedSlider 1.0 ThemedSlider.qml
 WindowControls 1.0 WindowControls.qml
+OverlayScrollBar 1.0 OverlayScrollBar.qml

@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.21
+Version:        0.7.27
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -17,6 +17,8 @@ Requires:       qt6-qtbase-gui
 Requires:       qt6-qtdeclarative
 Requires:       qt6-qtmultimedia
 Requires:       qt6-qtsvg
+# H.264 decoder for the animated album covers (falls back to the still cover without it)
+Recommends:     openh264
 Recommends:     xdg-desktop-portal-gnome
 
 %description
@@ -43,6 +45,64 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.27-1
+- Versão única com a 0.7.23 (mixagem inteligente), a 0.7.24 (letras ao
+  lado das músicas), a 0.7.25 (informações de artistas e álbuns salvas
+  junto com as músicas) e a 0.7.26 (lista de álbuns com capa animada).
+- Capas animadas também na tela da letra, e no painel mesmo com a página
+  do mesmo álbum aberta: um único vídeo é decodificado e mostrado nos
+  dois lugares, então custa o mesmo que uma capa só.
+- O loop não pisca mais: a capa parada não volta a aparecer quando o
+  vídeo recomeça, nem quando a janela perde o foco.
+- Barras de rolagem finas por cima do conteúdo, no estilo de cada tema:
+  aparecem ao rolar ou ao passar o mouse e engrossam para arrastar. Nas
+  letras, só aparecem quando você mesmo rola.
+
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.25-1
+- Informações de todos os artistas e álbuns buscadas em segundo plano
+  depois de indexar (MusicBrainz e Wikipédia, uma consulta por segundo),
+  das mais tocadas para as menos tocadas, com contador na barra lateral.
+  Continua de onde parou ao reabrir o app; para sozinha sem internet.
+- As informações ficam salvas junto com as músicas, em arquivos ocultos:
+  .arara-album.json na pasta do álbum e .arara-artist.json (com a foto
+  .arara-artist.jpg) na pasta do artista. Se o banco do app se perder, ou
+  em outro computador com o mesmo disco, tudo volta dos arquivos sem
+  internet. Discos somente leitura ou bloqueados ficam só no cache do app.
+- Álbum certo no MusicBrainz: usa a edição original (a primeira lançada)
+  em vez de qualquer edição, como uma prensagem japonesa com faixa bônus.
+  Código de barras só aparece quando as tags dizem qual edição é a sua.
+- Preferências > Biblioteca: "Buscar de toda a biblioteca" e "Salvar junto
+  com as músicas".
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.26-1
+- Capas animadas: Preferências > Biblioteca mostra a lista dos álbuns que
+  ganharam capa animada ("Ver álbuns"); clicar num deles abre o álbum. A
+  lista cresce enquanto "Baixar agora" encontra novas capas.
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.23-1
+- Mixagem inteligente conferida com áudio gravado. Correções:
+- Curva DJ refeita: troca rápida no meio com potência constante (a antiga
+  deixava um buraco de ~9 dB no volume no meio da transição)
+- Alinhar na batida: a próxima música entrava ~0,16 s atrasada (tempo que o
+  sistema leva para soltar o som); agora entra no tempo, com ajuste em
+  Preferências > Reprodução > "Atraso para começar a próxima"
+- Andamento medido com precisão de 0,1 BPM (121 era lido como 120, e as
+  batidas se desencontravam durante a mistura); análises antigas são refeitas
+- Sem intervalo (gapless) começa a próxima no momento certo, sem buraco
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.24-1
+- Letras ao lado das músicas: cada letra baixada do LRCLIB também é salva
+  como .lrc (ou .txt) na pasta da música, com o mesmo nome. Arquivos que já
+  existem nunca são trocados. As letras que já estavam no app são copiadas
+  uma vez ao abrir. Opção e botão "Copiar agora" em Preferências > Letras.
+- Pastas somente leitura e discos desconectados não travam nada: a letra
+  continua guardada no app.
+
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.22-1
+- Junta as capas animadas à versão 0.7.21.
+- Capas animadas: quando o álbum tem capa animada no Apple Music, ela toca
+  sem som na página do álbum e no painel. Opção em Preferências > Biblioteca
+  (desligada por padrão), com "Baixar agora" para todos os álbuns e "Apagar".
+  Cada capa é baixada uma vez (cerca de 2 MB) e fica no cache. O vídeo só
+  roda com a janela em foco e na tela; fora disso fica a capa normal.
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.21-1
 - Versão única que junta tudo desde a 0.7.12: editar informações da música
   (0.7.13), sem Música livre (0.7.14), sombra da capa (0.7.15), links e

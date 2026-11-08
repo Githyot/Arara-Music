@@ -42,8 +42,9 @@ Item {
         switch (curve) {
         case "linear": return [1 - p, p]
         case "scurve": { var s = p * p * (3 - 2 * p); return [1 - s, s] }
-        // "exp": the old song drops fast, the new one comes in late (like a DJ cut)
-        case "exp": return [Math.pow(1 - p, 3), Math.pow(p, 0.5) * p]
+        // "exp" (DJ): the old song holds, a fast swap in the middle, the new one holds;
+        // constant power, so the volume never dips (the old curve left a ~9 dB hole)
+        case "exp": { var q = Math.max(0, Math.min(1, (p - 0.3) / 0.4)); q = q * q * (3 - 2 * q); return [Math.cos(q * Math.PI / 2), Math.sin(q * Math.PI / 2)] }
         default: return [Math.cos(p * Math.PI / 2), Math.sin(p * Math.PI / 2)]
         }
     }

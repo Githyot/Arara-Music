@@ -1,5 +1,6 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // "Início": the page the app opens on. A big shuffle button, then the albums
 // and songs you played lately, what's new in the library, your artists and a
@@ -56,6 +57,7 @@ Item {
     Timer { interval: 60000; repeat: true; running: page.visible; onTriggered: page.now = new Date() }
 
     Flickable {
+        QQC.ScrollBar.vertical: OverlayScrollBar {}
         id: flick
         anchors.fill: parent
         contentHeight: col.height + 48

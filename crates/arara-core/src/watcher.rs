@@ -18,6 +18,10 @@ fn relevant(ev: &notify::Event) -> bool {
     use notify::EventKind::*;
     matches!(ev.kind, Create(_) | Modify(_) | Remove(_))
         && ev.paths.iter().any(|p| {
+            // our own info files next to the music (see infostore)
+            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(".arara-")) {
+                return false;
+            }
             // directories (no extension) matter too: a whole album folder can be moved in
             p.extension().is_none()
                 || p

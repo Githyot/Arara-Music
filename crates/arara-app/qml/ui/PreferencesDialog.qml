@@ -17,6 +17,59 @@ Item {
     signal clearHistory()
     function set(k, v) { if (setFn) setFn(k, v) }
     function get(k) { return prefs[k] }
+    // Animated cover cache and the "download all" progress.
+    property int motionFiles: 0
+    property real motionBytes: 0
+    property int motionDone: 0
+    property int motionTotal: 0
+    property int motionFound: 0
+    property string motionResult: ""
+    property bool motionBulk: false     // "Baixar agora" running (not a single album page)
+    property var motionAlbums: []
+    property bool motionListOpen: false
+    signal openAlbum(int id)
+    function refreshMotionAlbums() {
+        try { motionAlbums = JSON.parse(library.motionAlbumsJson()) } catch (e) { motionAlbums = [] }
+    }
+    function refreshMotion() {
+        try { var m = JSON.parse(library.motionCacheJson()); motionFiles = m.files; motionBytes = m.bytes } catch (e) {}
+    }
+    Connections {
+        target: library
+        function onMotionProgress(done, total, found) {
+            if (dlg.motionBulk) {
+                if (done >= total) dlg.motionBulk = false
+                dlg.motionDone = done; dlg.motionTotal = done >= total ? 0 : total; dlg.motionFound = found
+                if (total > 0 && done >= total)
+                    dlg.motionResult = "Pronto: " + found + " de " + total + (total === 1 ? " álbum procurado tem" : " álbuns procurados têm") + " capa animada"
+            }
+            if (!dlg.visible) return
+            var before = dlg.motionFiles
+            dlg.refreshMotion()
+            // New covers show up in the open list as they arrive.
+            if (dlg.motionListOpen && dlg.motionFiles !== before) dlg.refreshMotionAlbums()
+        }
+    }
+    onVisibleChanged: if (visible) { refreshMotion(); if (motionListOpen) refreshMotionAlbums() }
+    // Copying the lyrics in the database to files beside the songs.
+    property int lrcDone: 0
+    property int lrcTotal: 0
+    property bool lrcRunning: false
+    property string lrcResult: ""
+    function exportLyrics() { lrcRunning = true; lrcTotal = 0; lrcResult = ""; library.exportLyricsFiles() }
+    Connections {
+        target: library
+        function onLyricsExportProgress(done, total) { dlg.lrcRunning = done < total; dlg.lrcDone = done; dlg.lrcTotal = total }
+        function onLyricsExported(written, kept, failed, missing) {
+            dlg.lrcRunning = false
+            var parts = []
+            parts.push(written === 0 ? "Nenhuma letra nova para copiar" : (written === 1 ? "1 letra copiada" : written + " letras copiadas") + " para as pastas")
+            if (kept > 0) parts.push(kept + (kept === 1 ? " já estava lá" : " já estavam lá"))
+            if (failed > 0) parts.push(failed + " em pastas sem permissão de escrita (ficam só no app)")
+            if (missing > 0) parts.push(missing + (missing === 1 ? " música não encontrada agora (disco desconectado?)" : " músicas não encontradas agora (disco desconectado?)"))
+            dlg.lrcResult = parts.join(", ")
+        }
+    }
     function open() { visible = true; card.forceActiveFocus() }
     function close() { visible = false }
 
@@ -104,7 +157,7 @@ Item {
                 contentHeight: body.height + 32
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                ScrollBar.vertical: OverlayScrollBar {}
                 Column {
                     id: body
                     x: 24; width: scroller.width - 48
@@ -287,7 +340,7 @@ Item {
                         ChoiceRow {
                             title: "Curva"
                             subtitle: ({ equal: "Potência constante: o volume não afunda no meio", linear: "Volume muda em linha reta (afunda um pouco no meio)",
-                                         scurve: "Começa e termina devagar, troca rápido no meio", exp: "A atual some logo, a próxima entra no fim, estilo DJ" })[dlg.get("xfcurve")] || ""
+                                         scurve: "Começa e termina devagar, troca rápido no meio", exp: "Troca rápida no meio, como um corte de DJ, sem buraco no volume" })[dlg.get("xfcurve")] || ""
                             options: [{ v: "equal", t: "Suave" }, { v: "linear", t: "Linear" }, { v: "scurve", t: "Curva S" }, { v: "exp", t: "DJ" }]
                             value: dlg.get("xfcurve")
                             onPicked: (v) => dlg.set("xfcurve", v)
@@ -329,6 +382,15 @@ Item {
                             checked: dlg.get("xfpause")
                             onToggled: dlg.set("xfpause", !checked)
                         }
+                        SliderRow {
+                            enabled: dlg.get("xfmode") === "gapless" || (dlg.get("xfmode") === "smart" && dlg.get("xfbeat")) || dlg.get("xfalbum")
+                            title: "Atraso para começar a próxima"
+                            subtitle: "O tempo que o sistema leva para soltar o som de uma música que começou. Se as batidas ficarem desencontradas ou sobrar um silêncio sem intervalo, ajuste aqui"
+                            from: 0; to: 300; step: 10
+                            value: dlg.get("xflatency")
+                            label: Math.round(value) + " ms"
+                            onMoved: (v) => dlg.set("xflatency", v)
+                        }
                     }
                     Group {
                         visible: dlg.page === "play"
@@ -362,6 +424,25 @@ Item {
                             subtitle: "Procura no LRCLIB as letras que não estão ao lado dos arquivos"
                             checked: dlg.get("autolyrics")
                             onToggled: dlg.set("autolyrics", !checked)
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "lyrics"
+                        title: "Arquivos de letra"
+                        SwitchRow {
+                            title: "Salvar letras ao lado das músicas"
+                            subtitle: "Cada letra baixada vira um arquivo .lrc (ou .txt, se não for sincronizada) na pasta da música, com o mesmo nome. Assim ela não se perde e qualquer player encontra. Arquivos que já existem nunca são trocados"
+                            checked: dlg.get("lrcbeside")
+                            onToggled: { var on = !checked; dlg.set("lrcbeside", on); if (on) dlg.exportLyrics() }
+                        }
+                        ButtonRow {
+                            visible: dlg.get("lrcbeside")
+                            title: "Letras guardadas no app"
+                            subtitle: dlg.lrcRunning
+                                ? (dlg.lrcTotal > 0 ? "Copiando… " + dlg.lrcDone + " de " + dlg.lrcTotal : "Copiando…")
+                                : dlg.lrcResult || "Copia para as pastas as letras que foram baixadas ou escritas antes e ainda estão só dentro do app"
+                            button: "Copiar agora"
+                            onClicked: dlg.exportLyrics()
                         }
                     }
                     Group {
@@ -422,6 +503,72 @@ Item {
                             subtitle: "Créditos, biografia e foto dos artistas e dados dos álbuns no MusicBrainz e na Wikipédia. Só o nome da música, do álbum ou do artista é enviado"
                             checked: dlg.get("onlineinfo")
                             onToggled: dlg.set("onlineinfo", !checked)
+                        }
+                        SwitchRow {
+                            title: "Buscar de toda a biblioteca"
+                            subtitle: dlg.get("onlineinfo")
+                                ? (library.infoProgress ? library.infoProgress + ". " : "") + "Procura em segundo plano todos os artistas e álbuns, uma consulta por segundo, para as páginas abrirem já carregadas. Continua de onde parou ao reabrir o app"
+                                : "Ligue “Buscar informações online” para usar"
+                            enabled: dlg.get("onlineinfo")
+                            opacity: enabled ? 1 : 0.5
+                            checked: dlg.get("infoprefetch")
+                            onToggled: dlg.set("infoprefetch", !checked)
+                        }
+                        SwitchRow {
+                            title: "Salvar junto com as músicas"
+                            subtitle: "Guarda as informações num arquivo oculto na pasta de cada álbum e artista (.arara-album.json, .arara-artist.json e a foto), assim elas continuam lá mesmo se o app for reinstalado. Em discos somente leitura, ficam só no app"
+                            enabled: dlg.get("onlineinfo")
+                            opacity: enabled ? 1 : 0.5
+                            checked: dlg.get("infofiles")
+                            onToggled: dlg.set("infofiles", !checked)
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "library"
+                        title: "Capas animadas"
+                        SwitchRow {
+                            title: "Baixar capas animadas"
+                            subtitle: dlg.get("onlineinfo")
+                                ? "Quando o álbum tem uma capa animada no Apple Music, ela toca sem som na página do álbum e no painel. Cada uma é baixada uma vez (cerca de 2 MB) e fica guardada. Usa o serviço não oficial artwork.m8tec.top, que recebe só o nome do álbum e do artista"
+                                : "Ligue “Buscar informações online” para usar"
+                            enabled: dlg.get("onlineinfo")
+                            opacity: enabled ? 1 : 0.5
+                            checked: dlg.get("motioncovers")
+                            onToggled: { dlg.set("motioncovers", !checked); dlg.refreshMotion() }
+                        }
+                        ButtonRow {
+                            visible: dlg.get("motioncovers") && dlg.get("onlineinfo")
+                            title: "Todos os álbuns"
+                            subtitle: dlg.motionTotal > 0
+                                ? "Procurando… " + dlg.motionDone + " de " + dlg.motionTotal + " álbuns, " + dlg.motionFound + " com capa animada"
+                                : dlg.motionResult || "Sem isso, a capa animada é procurada quando você abre o álbum ou toca uma música dele"
+                            button: "Baixar agora"
+                            onClicked: { dlg.motionBulk = true; dlg.motionResult = "Todos os álbuns já foram procurados"; library.downloadAllMotionCovers() }
+                        }
+                        ButtonRow {
+                            visible: dlg.motionFiles > 0
+                            title: dlg.motionAlbums.length > 0 && dlg.motionListOpen
+                                ? (dlg.motionAlbums.length === 1 ? "1 álbum com capa animada" : dlg.motionAlbums.length + " álbuns com capa animada")
+                                : "Álbuns com capa animada"
+                            subtitle: dlg.motionListOpen ? "Clique num álbum para abrir e ver a capa animando" : "Veja quais álbuns ganharam capa animada"
+                            button: dlg.motionListOpen ? "Esconder" : "Ver álbuns"
+                            onClicked: { dlg.motionListOpen = !dlg.motionListOpen; if (dlg.motionListOpen) dlg.refreshMotionAlbums() }
+                        }
+                        Repeater {
+                            model: dlg.motionListOpen ? dlg.motionAlbums : []
+                            delegate: MotionAlbumRow {
+                                required property var modelData
+                                album: modelData
+                                onClicked: dlg.openAlbum(modelData.id)
+                            }
+                        }
+                        ButtonRow {
+                            visible: dlg.motionFiles > 0
+                            title: "Capas animadas guardadas"
+                            subtitle: dlg.motionFiles + (dlg.motionFiles === 1 ? " capa, " : " capas, ") + (dlg.motionBytes / 1048576).toFixed(1).replace(".", ",") + " MB no disco"
+                            button: "Apagar"
+                            destructive: true
+                            onClicked: { library.clearMotionCovers(); dlg.motionResult = ""; dlg.motionAlbums = []; dlg.motionListOpen = false; dlg.refreshMotion(); Prefs.motionCleared() }
                         }
                     }
                     Group {
@@ -631,7 +778,7 @@ Item {
                 switch (curve) {
                 case "linear": return [1 - p, p]
                 case "scurve": { var s = p * p * (3 - 2 * p); return [1 - s, s] }
-                case "exp": return [Math.pow(1 - p, 3), Math.pow(p, 0.5) * p]
+                case "exp": { var q = Math.max(0, Math.min(1, (p - 0.3) / 0.4)); q = q * q * (3 - 2 * q); return [Math.cos(q * Math.PI / 2), Math.sin(q * Math.PI / 2)] }
                 default: return [Math.cos(p * Math.PI / 2), Math.sin(p * Math.PI / 2)]
                 }
             }
@@ -701,6 +848,31 @@ Item {
                 font.family: Theme.font; font.pointSize: Theme.fontSize - 1
             }
         }
+    }
+
+    // One album of the "with animated cover" list: cover, title, artist; opens the album.
+    component MotionAlbumRow: RowBase {
+        id: mr
+        property var album: ({})
+        signal clicked()
+        title: ""
+        trailingWidth: 30
+        height: 56
+        color: ma.containsMouse ? Theme.hover : (Theme.fluent ? Theme.cardBg : "transparent")
+        CoverArt {
+            id: mrArt
+            anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+            width: 40; height: 40
+            source: mr.album.cover || ""
+        }
+        Column {
+            anchors { left: mrArt.right; leftMargin: 12; right: parent.right; rightMargin: 40; verticalCenter: parent.verticalCenter }
+            spacing: 2
+            Text { width: parent.width; text: mr.album.title || ""; color: Theme.fg; elide: Text.ElideRight; font.family: Theme.font; font.pointSize: Theme.fontSize }
+            Text { width: parent.width; text: (mr.album.artist || "") + (mr.album.year ? " · " + mr.album.year : ""); color: Theme.dimFg; elide: Text.ElideRight; font.family: Theme.font; font.pointSize: Theme.fontSize - 1.5 }
+        }
+        Icon { anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter } name: "go-next"; size: 16; color: Theme.dimFg }
+        MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: mr.clicked() }
     }
 
     component ButtonRow: RowBase {

@@ -74,12 +74,14 @@ Item {
             anchors.centerIn: parent
             width: Math.min(left.width - 64, 380)
             spacing: 14
-            CoverArt {
+            MotionCover {
                 visible: ls.wide || left.height > 380
                 width: Math.min(parent.width, ls.wide ? ls.height - 330 : left.height - 230); height: width
                 anchors.horizontalCenter: parent.horizontalCenter
                 decode: 640
                 source: ls.track ? ls.track.coverBig : ""
+                albumId: ls.track && ls.track.albumId ? ls.track.albumId : -1
+                active: ls.visible
             }
             Column {
                 width: parent.width; spacing: 2

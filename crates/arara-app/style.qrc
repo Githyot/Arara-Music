@@ -6,6 +6,7 @@
     <file alias="Toggle.qml">qml/style/Toggle.qml</file>
     <file alias="ThemedSlider.qml">qml/style/ThemedSlider.qml</file>
     <file alias="WindowControls.qml">qml/style/WindowControls.qml</file>
+    <file alias="OverlayScrollBar.qml">qml/style/OverlayScrollBar.qml</file>
     <file alias="icons/maximize.svg">qml/style/icons/maximize.svg</file>
     <file alias="icons/minimize.svg">qml/style/icons/minimize.svg</file>
     <file alias="icons/restore.svg">qml/style/icons/restore.svg</file>

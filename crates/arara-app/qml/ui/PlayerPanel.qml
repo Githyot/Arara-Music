@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls.Basic
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Right-hand player panel: big cover, title/artist/album, seek with
 // elapsed/remaining, transport, wide volume; the queue opens from its button.
@@ -89,6 +90,7 @@ Rectangle {
 
     // ---------- Player tab ----------
     Flickable {
+        QQC.ScrollBar.vertical: OverlayScrollBar { onDark: true }
         id: playerTab
         visible: opacity > 0
         opacity: panel.tab === "player" ? 1 : 0
@@ -127,10 +129,11 @@ Rectangle {
                         width: parent.width + margin * 2; height: parent.height + margin * 2
                         fragmentShader: "qrc:/qt/qml/AraraStyle/shadow.frag.qsb"
                     }
-                    CoverArt {
+                    MotionCover {
                         anchors.fill: parent
                         decode: 640
                         source: panel.track ? panel.track.coverBig : ""
+                        albumId: panel.track && panel.track.albumId ? panel.track.albumId : -1
                     }
                 }
             }

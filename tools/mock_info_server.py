@@ -30,6 +30,8 @@ class H(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def do_GET(self):
+        if self.path.startswith("/ws/2/"):
+            import time; sys.stderr.write(f"{time.time():.3f} {self.path[:90]}\n"); sys.stderr.flush()
         u = urlparse(self.path); q = parse_qs(u.query).get("query", [""])[0]; p = u.path
         if p == "/ws/2/artist/" and "tag:" in q:
             # "Similares": artists filed under a tag (made-up names, one already in the test library).
@@ -63,10 +65,20 @@ class H(BaseHTTPRequestHandler):
         if p == "/photo.jpg":
             return self.send(open(PHOTO, "rb").read(), "image/jpeg")
         if p == "/ws/2/release/":
-            t = phrase(q, "release"); return self.send({"releases": [{"id": "rel-" + t.replace(" ", "_"), "title": t, "status": "Official", "score": 100}]})
+            # Two editions, a later Japanese one with a bonus track listed first
+            # (like real searches do): the original should be picked.
+            t = phrase(q, "release"); a = phrase(q, "artist"); b = t.replace(" ", "_")
+            credit = [{"name": a, "artist": {"name": a}}]
+            return self.send({"releases": [
+                {"id": "rel-JP-" + b, "title": t, "status": "Official", "score": 100, "date": "2022-06-01", "country": "JP",
+                 "track-count": 11, "barcode": "4580000000001", "artist-credit": credit},
+                {"id": "rel-BR-" + b, "title": t, "status": "Official", "score": 98, "date": "2021-03-12", "country": "BR",
+                 "track-count": 10, "barcode": "7891234567895", "artist-credit": credit}]})
         if p.startswith("/ws/2/release/"):
-            t = unquote(p.split("/")[-1][4:]).replace("_", " ")
-            return self.send({"id": p.split("/")[-1], "title": t, "date": "2021-03-12", "country": "BR", "barcode": "7891234567895",
+            rid = p.split("/")[-1]; country = rid[4:6]; t = unquote(rid[7:]).replace("_", " ")
+            jp = country == "JP"
+            return self.send({"id": rid, "title": t, "date": "2022-06-01" if jp else "2021-03-12", "country": country,
+                "barcode": "4580000000001" if jp else "7891234567895",
                 "label-info": [{"catalog-number": "PDR-021", "label": {"name": "Selo Pindorama"}}],
                 "release-group": {"id": "rg1", "primary-type": "Album", "secondary-types": [], "first-release-date": "2021-03-12", "genres": []},
                 "genres": [{"name": "mpb", "count": 4}, {"name": "nova mpb", "count": 2}], "media": [{"format": "Digital Media"}],

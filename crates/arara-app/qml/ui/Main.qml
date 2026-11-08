@@ -33,11 +33,11 @@ Window {
         theme: "gnome", scheme: "system", accent: "theme", panelcolors: true,
         tilesize: "medium", fontscale: 1.0, compact: false, reducemotion: false,
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
-        autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
-        explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true, listening: true,
+        autolyrics: true, lrcbeside: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
+        explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true, infoprefetch: true, infofiles: true, listening: true, motioncovers: false,
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
-        xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
+        xfmanual: true, xfpause: true, xfbeat: false, xfloud: true, xflatency: 160,
         hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
         edittags: true
     })
@@ -138,6 +138,7 @@ Window {
     Binding { target: Prefs; property: "lyricsInPanel"; value: win.prefs.lyricspanel }
     Binding { target: Prefs; property: "remainingTime"; value: win.prefs.remaining }
     Binding { target: Prefs; property: "showExplicit"; value: win.prefs.explicit }
+    Binding { target: Prefs; property: "motionCovers"; value: win.prefs.motioncovers && win.prefs.onlineinfo }
     Binding { target: Prefs; property: "explicitLyrics"; value: win.prefs.explicitlyrics }
     Binding { target: Prefs; property: "playbackRate"; value: Prefs.clampRate(Number(win.prefs.rate) || 1) }
     Connections {
@@ -491,7 +492,9 @@ Window {
             var trim = trimOn()
             var endA = trim && A ? A.outro_ms : durA
             var startB = trim && B && B.intro_ms > 300 ? B.intro_ms : 0
-            var lead = 60   // GStreamer needs a moment to start the preloaded song
+            // GStreamer takes a moment (~0.1 s, measured) before a started song is heard:
+            // gapless switches start that much early, beat-aligned mixes skip that much in.
+            var lead = Math.max(0, Number(win.prefs.xflatency))
             if (mode === "gapless" || sameAlbum(a, b)) {
                 // Albums that flow into the next track (live, concept albums) stay intact.
                 if (sameAlbum(a, b)) { endA = durA; startB = 0 }
@@ -499,7 +502,7 @@ Window {
             }
             var user = win.prefs.xfdur * 1000
             var cap = Math.max(1000, Math.min(durA, durB || durA) / 3)
-            var d = Math.min(user, cap), at = endA - d
+            var d = Math.min(user, cap), at = endA - d, aligned = false
             if (mode === "smart" && A && B) {
                 // MixRamp: the next song reaches full level just as this one drops below it.
                 var head = Math.max(0, B.ramp_in_ms - startB)
@@ -516,11 +519,13 @@ Window {
                     if (close) {
                         at = beatAt(A, at, false)
                         startB = Math.max(startB, B.beat_ms)
+                        aligned = true
                     }
                 }
                 d = endA - at
             }
-            return { at: at, start: startB, dur: d, cut: true }
+            if (aligned) startB += lead
+            return { at: at, start: startB, dur: d, cut: true, beat: aligned }
         }
         property real nextAt: -1     // position where the next transition starts
         function tick() {
@@ -892,7 +897,7 @@ Window {
             onSetCollapsed: (key, value) => { var c = Object.assign({}, win.prefs.collapsed); c[key] = value; win.setPref("collapsed", c) }
             page: nav.section
             playlistId: nav.playlist ? nav.playlist.id : -1
-            footer: library.scanning ? library.status : library.trackCount + " faixas · " + library.albumCount + " álbuns" + (library.lyricsProgress ? "\n" + library.lyricsProgress : "")
+            footer: library.scanning ? library.status : library.trackCount + " faixas · " + library.albumCount + " álbuns" + (library.lyricsProgress ? "\n" + library.lyricsProgress : "") + (library.infoProgress ? "\n" + library.infoProgress : "")
             onNavigate: (p) => nav.root(p)
             onOpenPlaylist: (p) => nav.rootPlaylist(p)
             servers: []
@@ -1315,6 +1320,7 @@ Window {
 
     LyricsEditor {
         id: lyricsEditor
+        saveBeside: win.prefs.lrcbeside
         parent: frame
         anchors.fill: parent
         anchors.bottomMargin: playerBar.visible ? playerBar.height : 0
@@ -1444,9 +1450,15 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.13",
+        onAbout: prompt.info("Arara Music 0.7.27",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
+    // Decodes the animated covers once for every place that shows them.
+    MotionHub {
+        id: motionHub
+        Component.onCompleted: Prefs.motionHub = motionHub
+    }
+
     PreferencesDialog {
         id: prefsDialog
         parent: frame
@@ -1456,6 +1468,7 @@ Window {
         onChooseFolders: { foldersDialog.dirs = JSON.parse(library.libraryDirsJson()); foldersDialog.open() }
         onRescan: { library.changeLibraryDir(library.libraryDir); toast.show("Reindexando a biblioteca…") }
         onRebuildCovers: { library.rebuildCovers(); toast.show("Refazendo as capas dos álbuns…") }
+        onOpenAlbum: (id) => { prefsDialog.close(); win.lyricsMode = false; nav.openAlbumById(id) }
         onResetAll: prompt.confirm("Restaurar as preferências?", "Tema, cores, reprodução e letras voltam ao padrão.", "Restaurar", function () { win.resetPrefs() })
         onClearHistory: prompt.confirm("Apagar o histórico de escuta?", "Todas as retrospectivas voltam a zero. Não dá para desfazer.", "Apagar", function () {
             listen.restart(); library.clearListens(); recapPage.reload(); toast.show("Histórico de escuta apagado")

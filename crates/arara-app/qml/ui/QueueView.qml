@@ -1,8 +1,10 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Play queue: click to jump, ✕ to remove. Upcoming tracks after the current one.
 ListView {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: lv
     property var queue: []
     property int current: -1

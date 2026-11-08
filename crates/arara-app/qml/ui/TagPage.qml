@@ -1,9 +1,11 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // "Similares": everything in the library (local and synced servers) that
 // shares a genre chip, plus artists MusicBrainz files under it.
 Flickable {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: page
     property string tag: ""
     property string fromName: ""        // artist/album the chip was on

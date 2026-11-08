@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Lyrics editor in two steps:
 //  1. "Texto": paste or type the lyrics, one line per sung line.
@@ -18,6 +19,7 @@ Rectangle {
     property int cursor: 0
     property bool saved: false
     property bool publishing: false
+    property bool saveBeside: true      // Preferences › Letras › "Salvar ao lado das músicas"
     signal seek(real ms)
     signal togglePlay()
     signal save(string text, bool synced, bool sidecar)
@@ -29,6 +31,7 @@ Rectangle {
 
     function openWith(t, lyrics) {
         track = t; saved = false; publishing = false; step = "text"; cursor = 0
+        sidecar.checked = saveBeside
         if (lyrics.kind === "synced") {
             lines = lyrics.lines.filter(function (l) { return l.text !== "" }).map(function (l) { return { text: l.text, t: l.t } })
             editor.text = lines.map(function (l) { return l.text }).join("\n")
@@ -122,6 +125,7 @@ Rectangle {
         radius: Theme.cardRadius; color: Theme.cardBg
         border.color: editor.activeFocus ? Theme.accent : Theme.border; border.width: editor.activeFocus ? 2 : 1
         Flickable {
+            QQC.ScrollBar.vertical: OverlayScrollBar {}
             id: flick
             anchors.fill: parent; anchors.margins: 14
             contentHeight: editor.implicitHeight
@@ -140,6 +144,7 @@ Rectangle {
 
     // ---- step 2: sync ----
     ListView {
+        QQC.ScrollBar.vertical: OverlayScrollBar {}
         id: list
         visible: ed.step === "sync"
         anchors { left: parent.left; right: parent.right; top: switcher.bottom; bottom: syncBar.top; topMargin: 12 }

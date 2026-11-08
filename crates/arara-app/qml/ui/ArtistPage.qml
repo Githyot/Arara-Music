@@ -1,10 +1,12 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Artist page laid out like the album page: photo, name, play buttons and the
 // "Sobre o artista" block in a column on the left, the albums on the right
 // (on narrow windows: header, albums, then the About block).
 Flickable {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: page
     property var artist: null
     property var albums: []

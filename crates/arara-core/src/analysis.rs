@@ -27,7 +27,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
 /// Bump when the algorithm changes, so old cached results are recomputed.
-pub const VERSION: i64 = 2;
+pub const VERSION: i64 = 3;
 
 /// Envelope resolution: one block = 10 ms.
 const BLOCK_MS: usize = 10;
@@ -304,25 +304,40 @@ fn estimate_tempo(dbs: &[f32], first: usize, body_from: usize, body_to: usize) -
     let (y0, y1, y2) = (scores[l - 1], scores[l], scores[l + 1]);
     let denom = y0 - 2.0 * y1 + y2;
     let frac = if denom.abs() > 1e-12 { 0.5 * (y0 - y2) / denom } else { 0.0 };
-    let period = l as f64 + frac.clamp(-0.5, 0.5);
-    let bpm = 6000.0 / period;
+    let coarse = l as f64 + frac.clamp(-0.5, 0.5);
 
-    // Phase: offset that collects the most onset energy on the grid.
-    let p = period;
-    let mut best_phase = (0f64, -1f64);
-    let steps = l.max(1);
-    for k in 0..steps {
-        let off = k as f64;
+    // Refine: 10 ms blocks make neighbouring lags 1–2 BPM apart, so try periods
+    // within ±2.5 % in fine steps and keep the grid (period + phase) that lands
+    // on the most onset energy over the whole body of the song.
+    let body_seg = &out[body_from..body_to];
+    let comb = |p: f64, off: f64| -> f64 {
         let mut acc = 0f64;
-        let mut t = start as f64 + off;
-        while (t as usize) < start + len {
-            acc += out[t as usize] as f64;
+        let mut t = off;
+        while t + 1.0 < body_seg.len() as f64 {
+            let i = t as usize;
+            let f = (t - i as f64) as f32;
+            acc += (body_seg[i] * (1.0 - f) + body_seg[i + 1] * f) as f64;
             t += p;
         }
-        if acc > best_phase.1 {
-            best_phase = (off, acc);
+        acc
+    };
+    let mut best_grid = (coarse, 0f64, -1f64);
+    let mut p = coarse * 0.975;
+    while p <= coarse * 1.025 {
+        let mut off = 0f64;
+        while off < p {
+            let sc = comb(p, off);
+            if sc > best_grid.2 {
+                best_grid = (p, off, sc);
+            }
+            off += 0.5;
         }
+        p += 0.01;
     }
+    let p = best_grid.0;
+    let bpm = 6000.0 / p;
+    let best_phase = (best_grid.1, best_grid.2);
+    let start = body_from;
     // Project the grid back to the first beat at or after the music starts.
     let phase_abs = start as f64 + best_phase.0;
     let k = ((phase_abs - first as f64) / p).floor();

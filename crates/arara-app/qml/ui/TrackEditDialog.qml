@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // "Editar informações" (AdwDialog-like form): title, artists, album, numbers,
 // year, genre, composer and cover of one song. Local files can get the tags
@@ -104,6 +105,7 @@ Popup {
     contentItem: Item {
         implicitHeight: flick.contentHeight + buttons.height
         Flickable {
+            QQC.ScrollBar.vertical: OverlayScrollBar {}
             id: flick
             anchors { left: parent.left; right: parent.right; top: parent.top; bottom: buttons.top }
             contentHeight: form.height + 48

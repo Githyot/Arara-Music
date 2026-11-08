@@ -19,8 +19,9 @@ use std::time::{Duration, Instant};
 
 use crate::db::Db;
 
-/// How long an online answer stays fresh (30 days); misses are retried after 3.
-const FRESH_SECS: i64 = 30 * 24 * 3600;
+/// How long an online answer stays fresh (180 days: it is also saved next to
+/// the music, see `infostore`); misses are retried after 3.
+const FRESH_SECS: i64 = 180 * 24 * 3600;
 const MISS_SECS: i64 = 3 * 24 * 3600;
 const UA: &str = "AraraMusic/0.8 ( https://github.com/Githyot )";
 
@@ -133,6 +134,8 @@ pub fn file_details(path: &str) -> Value {
         ("publisher", ItemKey::Publisher),
         ("copyright", ItemKey::CopyrightMessage),
         ("isrc", ItemKey::Isrc),
+        ("barcode", ItemKey::Barcode),
+        ("catalog", ItemKey::CatalogNumber),
         ("bpm", ItemKey::Bpm),
         ("key", ItemKey::InitialKey),
         ("language", ItemKey::Language),
@@ -229,8 +232,26 @@ fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new().timeout(Duration::from_secs(12)).user_agent(UA).build()
 }
 
+thread_local! {
+    /// Requests on this thread that failed for network reasons (no answer,
+    /// timeout, 5xx/429), as opposed to a plain "not found".
+    static NET_ERRORS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Network failures seen by this thread so far (compare before/after a fetch).
+pub fn net_errors() -> u32 {
+    NET_ERRORS.with(|c| c.get())
+}
+
 fn get_json(a: &ureq::Agent, url: &str) -> Option<Value> {
-    a.get(url).call().ok()?.into_json().ok()
+    match a.get(url).call() {
+        Ok(r) => r.into_json().ok(),
+        Err(ureq::Error::Status(code, _)) if code != 429 && code < 500 => None,
+        Err(_) => {
+            NET_ERRORS.with(|c| c.set(c.get() + 1));
+            None
+        }
+    }
 }
 
 fn mb(a: &ureq::Agent, path: &str) -> Option<Value> {
@@ -413,22 +434,69 @@ pub fn fetch_artist(name: &str, mbid: Option<&str>) -> Option<Value> {
     }))
 }
 
+/// What the files say about the edition they come from: helps pick the
+/// right release among the many editions of one album.
+#[derive(Debug, Clone, Default)]
+pub struct AlbumHint {
+    /// Different songs in the folder (duplicates counted once).
+    pub tracks: usize,
+    pub barcode: Option<String>,
+    pub catalog: Option<String>,
+}
+
+fn digits(s: &str) -> String {
+    s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase()
+}
+
+/// Choose among search hits for one album. Only hits with the same title and
+/// artist count. If the files carry a barcode or catalog number, that edition
+/// wins. Otherwise the original release is taken (official, earliest date),
+/// with the track count of the files as a tie-break: a later Japanese
+/// pressing with a bonus track should not stand for the album. Returns the
+/// release id and whether the files identified that exact edition.
+pub fn pick_release(hits: &[Value], title: &str, artist: &str, hint: &AlbumHint) -> Option<(String, bool)> {
+    let w = norm(title);
+    if w.is_empty() {
+        return None;
+    }
+    let ok: Vec<&Value> = hits
+        .iter()
+        .filter(|h| norm(h["title"].as_str().unwrap_or("")) == w && credits_artist(h, artist))
+        .collect();
+    let same = |a: Option<&str>, b: Option<&String>| match (a, b) {
+        (Some(a), Some(b)) => !a.is_empty() && digits(a) == digits(b),
+        _ => false,
+    };
+    if let Some(h) = ok.iter().find(|h| same(h["barcode"].as_str(), hint.barcode.as_ref())) {
+        return s(&h["id"]).map(|id| (id, true));
+    }
+    if let Some(h) = ok.iter().find(|h| {
+        h["label-info"].as_array().is_some_and(|l| l.iter().any(|x| same(x["catalog-number"].as_str(), hint.catalog.as_ref())))
+    }) {
+        return s(&h["id"]).map(|id| (id, true));
+    }
+    let tracks = |h: &Value| h["track-count"].as_i64().unwrap_or(0);
+    ok.iter()
+        .min_by_key(|h| {
+            let official = h["status"] == "Official";
+            // "2005-07-26" sorts as text; no date goes last
+            let date = h["date"].as_str().filter(|d| !d.is_empty()).map(|d| d.to_owned()).unwrap_or_else(|| "9999".into());
+            let off = if hint.tracks > 0 { (tracks(h) - hint.tracks as i64).abs() } else { 0 };
+            (!official, date.chars().take(4).collect::<String>(), off, date, -h["score"].as_i64().unwrap_or(0))
+        })
+        .and_then(|h| s(&h["id"]))
+        .map(|id| (id, false))
+}
+
 /// Album facts: release date, label, catalog number, type, genres, Wikipedia text.
-pub fn fetch_album(title: &str, artist: &str, mbid: Option<&str>) -> Option<Value> {
+pub fn fetch_album(title: &str, artist: &str, mbid: Option<&str>, hint: &AlbumHint) -> Option<Value> {
     let a = agent();
-    let id = match mbid {
-        Some(id) => id.to_owned(),
+    let (id, exact) = match mbid {
+        Some(id) => (id.to_owned(), true),
         None => {
             let q = format!("release:{} AND artist:{}", phrase(title), phrase(artist));
-            let r = mb(&a, &format!("release/?query={}&limit=8", enc(&q)))?;
-            let hits = r["releases"].as_array()?;
-            // Same title *and* same artist, official releases first. No
-            // "best score" fallback: a near miss is another record.
-            let w = norm(title);
-            hits.iter()
-                .filter(|h| !w.is_empty() && norm(h["title"].as_str().unwrap_or("")) == w && credits_artist(h, artist))
-                .max_by_key(|h| (h["status"] == "Official") as i64 * 1000 + h["score"].as_i64().unwrap_or(0))
-                .and_then(|h| s(&h["id"]))?
+            let r = mb(&a, &format!("release/?query={}&limit=25", enc(&q)))?;
+            pick_release(r["releases"].as_array()?, title, artist, hint)?
         }
     };
     let d = mb(&a, &format!("release/{id}?inc=labels+release-groups+genres+tags+url-rels+media"))?;
@@ -481,7 +549,9 @@ pub fn fetch_album(title: &str, artist: &str, mbid: Option<&str>) -> Option<Valu
         "country": s(&d["country"]),
         "label": s(&label["label"]["name"]),
         "catalog": s(&label["catalog-number"]),
-        "barcode": s(&d["barcode"]),
+        // edition details only when the files say which edition they are
+        "barcode": if exact { s(&d["barcode"]) } else { None },
+        "edition": exact,
         "type": kind,
         "secondary": secondary,
         "media": media,
@@ -638,18 +708,51 @@ pub fn cached_or_fetch(db: &Db, kind: &str, key: &str, now: i64, force: bool, fe
             }
         }
     }
+    let errs = net_errors();
     let data = fetch().unwrap_or(Value::Null);
-    let _ = db.set_kv(&k, &json!({ "at": now, "data": data }).to_string());
+    // Offline is not "not found": don't remember a miss we never got.
+    if !data.is_null() || net_errors() == errs {
+        let _ = db.set_kv(&k, &json!({ "at": now, "data": data }).to_string());
+    }
     data
+}
+
+/// The cached answer for `info:<kind>:<key>` if it is still fresh:
+/// `Some(Value::Null)` is a remembered miss, `None` means "ask again".
+pub fn cached(db: &Db, kind: &str, key: &str, now: i64) -> Option<Value> {
+    let v = db.get_kv(&format!("info:{kind}:{}", norm(key))).ok().flatten().and_then(|s| serde_json::from_str::<Value>(&s).ok())?;
+    let at = v["at"].as_i64().unwrap_or(0);
+    let fresh = if v["data"].is_null() { MISS_SECS } else { FRESH_SECS };
+    (now - at < fresh).then(|| v["data"].clone())
+}
+
+/// Store an answer read back from a saved file, as if just fetched at `at`.
+pub fn remember(db: &Db, kind: &str, key: &str, at: i64, data: &Value) {
+    let _ = db.set_kv(&format!("info:{kind}:{}", norm(key)), &json!({ "at": at, "data": data }).to_string());
+}
+
+/// The cached copy of a downloaded photo, if there is one (no network).
+pub fn cache_image_cached(url: &str, dir: &Path) -> Option<String> {
+    let path = dir.join(format!("web-{}.img", &blake3::hash(url.as_bytes()).to_hex()[..24]));
+    path.exists().then(|| path.to_string_lossy().into_owned())
+}
+
+/// Whatever is cached, fresh or not (used when online lookups are off).
+pub fn stale(db: &Db, kind: &str, key: &str) -> Value {
+    db.get_kv(&format!("info:{kind}:{}", norm(key)))
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .map(|v| v["data"].clone())
+        .unwrap_or(Value::Null)
 }
 
 /// Download an artist photo once into the cover cache; returns its file path.
 pub fn cache_image(url: &str, dir: &Path) -> Option<String> {
-    let name = format!("web-{}.img", &blake3::hash(url.as_bytes()).to_hex()[..24]);
-    let path = dir.join(name);
-    if path.exists() {
-        return Some(path.to_string_lossy().into_owned());
+    if let Some(p) = cache_image_cached(url, dir) {
+        return Some(p);
     }
+    let path = dir.join(format!("web-{}.img", &blake3::hash(url.as_bytes()).to_hex()[..24]));
     let resp = agent().get(url).call().ok()?;
     let mut bytes = vec![];
     use std::io::Read;
@@ -703,5 +806,40 @@ mod strict_match_tests {
         assert!(pick(&hits, "name", "Charlie Brown Jr.").is_none());
         let hits = vec![json!({ "name": "CBJR", "score": 90, "aliases": [{ "name": "Charlie Brown Jr." }] })];
         assert!(pick(&hits, "name", "Charlie Brown Jr.").is_some());
+    }
+}
+
+#[cfg(test)]
+mod release_pick_tests {
+    use super::*;
+
+    fn rel(id: &str, date: &str, country: &str, tracks: i64, barcode: &str) -> Value {
+        json!({ "id": id, "title": "All We Know Is Falling", "status": "Official", "score": 100, "date": date,
+                "country": country, "track-count": tracks, "barcode": barcode,
+                "artist-credit": [{ "name": "Paramore", "artist": { "name": "Paramore" } }] })
+    }
+
+    #[test]
+    fn prefers_the_original_over_a_later_edition() {
+        // Search order puts the Japanese pressing (with a bonus track) first.
+        let hits = vec![
+            rel("jp", "2006-03-08", "JP", 11, "4580182720232"),
+            rel("us", "2005-07-26", "US", 10, "075678386529"),
+            rel("eu", "2006", "XE", 10, ""),
+        ];
+        let hint = AlbumHint { tracks: 11, ..Default::default() };
+        assert_eq!(pick_release(&hits, "All We Know Is Falling", "Paramore", &hint), Some(("us".into(), false)));
+        // a barcode in the tags names the edition
+        let hint = AlbumHint { tracks: 11, barcode: Some("4580182720232".into()), ..Default::default() };
+        assert_eq!(pick_release(&hits, "All We Know Is Falling", "Paramore", &hint), Some(("jp".into(), true)));
+        // another band's record never counts
+        assert_eq!(pick_release(&hits, "All We Know Is Falling", "Hayley", &AlbumHint::default()), None);
+    }
+
+    #[test]
+    fn same_year_editions_use_the_track_count() {
+        let hits = vec![rel("deluxe", "2005-11-01", "US", 14, ""), rel("std", "2005-07-26", "US", 10, "")];
+        let hint = AlbumHint { tracks: 14, ..Default::default() };
+        assert_eq!(pick_release(&hits, "All We Know Is Falling", "Paramore", &hint).unwrap().0, "deluxe");
     }
 }

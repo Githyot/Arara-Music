@@ -21,6 +21,7 @@ Player de música para Linux em **Rust + Qt/QML**, com visual inspirado no GNOME
 - Rolagem rápida com índice A–Z; gêneros, anos, compositores, pastas e coleções
 - Busca com filtros (`artista:`, `genero:`, `ano:2010-2019`, `pasta:`…), ordenação e playlists inteligentes
 - Várias pastas de música, selo Hi-Res/Sem perdas, letras baixadas em segundo plano
+- Informações de todos os artistas e álbuns (MusicBrainz e Wikipédia) buscadas em segundo plano e salvas junto com as músicas (`.arara-album.json`, `.arara-artist.json`), então as páginas abrem já carregadas e nada se perde se o banco do app for apagado
 - Selo **E** de explícito, como no Apple Music: vem das tags do arquivo, do Navidrome/Jellyfin ou da letra (palavrões), e dá para marcar à mão
 - **Retrospectiva** como Spotify Wrapped / Apple Music Replay: minutos ouvidos por artista, música, álbum e gênero, por semana, mês, ano ou desde sempre, com modo "story" em tela cheia (tudo fica no computador)
 - Testado com 50 mil faixas: indexa em ~4 s e abre a janela em ~0,2 s

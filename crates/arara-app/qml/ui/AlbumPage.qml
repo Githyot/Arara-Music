@@ -1,10 +1,12 @@
 import QtQuick
 import QtQuick.Controls
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Album details: big art + title on the left (stacks on narrow widths),
 // boxed track list on the right.
 Flickable {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: page
     property var album
     property var tracks: []
@@ -41,11 +43,13 @@ Flickable {
             id: info
             width: wide ? (body.width >= 880 ? 300 : 260) : body.width
             spacing: 10
-            CoverArt {
+            MotionCover {
                 width: Math.min(wide ? parent.width : 260, parent.width); height: width
                 x: wide ? 0 : (parent.width - width) / 2
                 decode: 260
                 source: page.album ? page.album.coverBig : ""
+                albumId: page.album ? page.album.id : -1
+                primary: true
                 // Right-click on the art: the same cover menu as the "⋯" button.
                 MouseArea {
                     anchors.fill: parent; acceptedButtons: Qt.RightButton

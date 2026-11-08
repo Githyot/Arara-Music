@@ -1,8 +1,10 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Artists as round avatars (cover of their latest album), like GNOME Music.
 GridView {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: grid
     property var artists: []
     signal openArtist(var artist)

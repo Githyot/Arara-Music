@@ -1,10 +1,12 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Song details (like Apple Music's song page): cover, title, artist · album ·
 // date, play, lyrics, credits (file tags + MusicBrainz), details, library
 // stats and file properties.
 Flickable {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: page
     property var info: null          // trackInfoJson()
     property var online: null        // MusicBrainz answer, or null
