@@ -40,6 +40,25 @@ Item {
         }
     }
     onVisibleChanged: if (visible) refreshMotion()
+    // Copying the lyrics in the database to files beside the songs.
+    property int lrcDone: 0
+    property int lrcTotal: 0
+    property bool lrcRunning: false
+    property string lrcResult: ""
+    function exportLyrics() { lrcRunning = true; lrcTotal = 0; lrcResult = ""; library.exportLyricsFiles() }
+    Connections {
+        target: library
+        function onLyricsExportProgress(done, total) { dlg.lrcRunning = done < total; dlg.lrcDone = done; dlg.lrcTotal = total }
+        function onLyricsExported(written, kept, failed, missing) {
+            dlg.lrcRunning = false
+            var parts = []
+            parts.push(written === 0 ? "Nenhuma letra nova para copiar" : (written === 1 ? "1 letra copiada" : written + " letras copiadas") + " para as pastas")
+            if (kept > 0) parts.push(kept + (kept === 1 ? " já estava lá" : " já estavam lá"))
+            if (failed > 0) parts.push(failed + " em pastas sem permissão de escrita (ficam só no app)")
+            if (missing > 0) parts.push(missing + (missing === 1 ? " música não encontrada agora (disco desconectado?)" : " músicas não encontradas agora (disco desconectado?)"))
+            dlg.lrcResult = parts.join(", ")
+        }
+    }
     function open() { visible = true; card.forceActiveFocus() }
     function close() { visible = false }
 
@@ -385,6 +404,25 @@ Item {
                             subtitle: "Procura no LRCLIB as letras que não estão ao lado dos arquivos"
                             checked: dlg.get("autolyrics")
                             onToggled: dlg.set("autolyrics", !checked)
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "lyrics"
+                        title: "Arquivos de letra"
+                        SwitchRow {
+                            title: "Salvar letras ao lado das músicas"
+                            subtitle: "Cada letra baixada vira um arquivo .lrc (ou .txt, se não for sincronizada) na pasta da música, com o mesmo nome. Assim ela não se perde e qualquer player encontra. Arquivos que já existem nunca são trocados"
+                            checked: dlg.get("lrcbeside")
+                            onToggled: { var on = !checked; dlg.set("lrcbeside", on); if (on) dlg.exportLyrics() }
+                        }
+                        ButtonRow {
+                            visible: dlg.get("lrcbeside")
+                            title: "Letras guardadas no app"
+                            subtitle: dlg.lrcRunning
+                                ? (dlg.lrcTotal > 0 ? "Copiando… " + dlg.lrcDone + " de " + dlg.lrcTotal : "Copiando…")
+                                : dlg.lrcResult || "Copia para as pastas as letras que foram baixadas ou escritas antes e ainda estão só dentro do app"
+                            button: "Copiar agora"
+                            onClicked: dlg.exportLyrics()
                         }
                     }
                     Group {

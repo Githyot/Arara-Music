@@ -278,6 +278,22 @@ pub mod qobject {
         #[cxx_name = "lyricsPublished"]
         fn lyrics_published(self: Pin<&mut Library>, track_id: i64, ok: bool, message: QString);
 
+        /// Copy the lyrics kept in the database (LRCLIB and hand-made) to `.lrc`/`.txt`
+        /// files next to the songs, never overwriting one. Worker thread; reports with
+        /// `lyricsExportProgress` and `lyricsExported`.
+        #[qinvokable]
+        #[cxx_name = "exportLyricsFiles"]
+        fn export_lyrics_files(self: Pin<&mut Library>);
+
+        #[qsignal]
+        #[cxx_name = "lyricsExportProgress"]
+        fn lyrics_export_progress(self: Pin<&mut Library>, done: i32, total: i32);
+
+        /// Final counts: written, already there, folder not writable, song not reachable.
+        #[qsignal]
+        #[cxx_name = "lyricsExported"]
+        fn lyrics_exported(self: Pin<&mut Library>, written: i32, kept: i32, failed: i32, missing: i32);
+
         /// Small persistent preferences (volume, ReplayGain mode…).
         #[qinvokable]
         #[cxx_name = "setting"]
@@ -1870,10 +1886,14 @@ impl qobject::Library {
         let _ = db.store_lyrics(track_id, "user", s, p, now());
         if sidecar {
             if let Ok(Some(t)) = db.track(track_id).map(|t| t.filter(|t| !remote::is_remote(&t.path))) {
-                let ext = if synced { "lrc" } else { "txt" };
-                if let Err(e) = std::fs::write(std::path::Path::new(&t.path).with_extension(ext), &text) {
-                    log::warn!("could not write sidecar lyrics: {e}");
-                }
+                // The folder may be on a slow or locked disk: never write on the UI thread.
+                let (path, text) = (t.path.clone(), text.clone());
+                std::thread::spawn(move || {
+                    let (s, p) = if synced { (Some(text.as_str()), None) } else { (None, Some(text.as_str())) };
+                    if let Err(e) = lyrics::write_sidecar(&path, s, p, true) {
+                        log::warn!("could not write sidecar lyrics: {e}");
+                    }
+                });
             }
         }
         let dur = db.track(track_id).ok().flatten().map(|t| t.duration_ms as u64);
@@ -2166,10 +2186,43 @@ impl qobject::Library {
 
 // ---------- background lyrics download ----------
 impl qobject::Library {
+    pub fn export_lyrics_files(self: Pin<&mut Self>) {
+        static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        use std::sync::atomic::Ordering;
+        if RUNNING.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            let rep = Db::open(&db_path)
+                .and_then(|db| {
+                    let qt = qt.clone();
+                    lyrics::export_sidecars(&db, move |done, total| {
+                        let _ = qt.queue(move |o| o.lyrics_export_progress(done as i32, total as i32));
+                    })
+                })
+                .unwrap_or_default();
+            log::info!("lyrics export: {rep:?}");
+            RUNNING.store(false, Ordering::SeqCst);
+            let _ = qt.queue(move |o| {
+                o.lyrics_exported(rep.written as i32, rep.kept as i32, rep.failed as i32, rep.missing as i32)
+            });
+        });
+    }
+
     /// After indexing: look up lyrics (sidecar, tags, LRCLIB) for every track that has none yet,
     /// most-played first, two requests at a time. One run at a time; stops when offline.
     pub fn prefetch_lyrics(mut self: Pin<&mut Self>) {
         use std::sync::atomic::{AtomicUsize, Ordering};
+        // Once per database: lyrics downloaded before 0.7.24 lived only in the
+        // database; copy them next to the songs too.
+        if let Some(db) = &self.db {
+            if lyrics::save_beside_enabled(db) && db.get_kv("lyrics:exported").ok().flatten().is_none() {
+                let _ = db.set_kv("lyrics:exported", "1");
+                self.as_mut().export_lyrics_files();
+            }
+        }
         if std::env::var("ARARA_OFFLINE").is_ok() {
             return;
         }
