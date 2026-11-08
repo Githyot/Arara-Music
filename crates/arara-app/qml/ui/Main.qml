@@ -159,6 +159,7 @@ Window {
         if (servicesStarted) return
         servicesStarted = true
         library.startServices()
+        if (nav.page === "home") homePage.reload()
         if (win.prefs.restore) { library.heartbeat("restaurando a última música"); player.restore() }
         library.heartbeat("pronto")
     }
@@ -587,7 +588,7 @@ Window {
     // ---------- navigation ----------
     QtObject {
         id: nav
-        property string page: "albums"
+        property string page: "home"
         property var album: null
         property var artist: null
         property var playlist: null
@@ -599,7 +600,7 @@ Window {
         // Sub-pages always get a back button, even when reached with no history.
         readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group" || page === "trackinfo" || page === "tag"
         // Sidebar entry the current view belongs to (an album opened from a server keeps "server").
-        property string section: "albums"
+        property string section: "home"
 
         // Snapshot of the current view, taken before a navigation changes it.
         function state() {
@@ -679,6 +680,8 @@ Window {
                 server = sv
                 serverPage.albums = JSON.parse(library.serverAlbumsJson(sv.id))
             }
+            // The home page waits for the first frame (see startServices).
+            if (page === "home" && win.servicesStarted) homePage.reload()
             if (page === "genre" || page === "year" || page === "composer" || page === "folder") { groupsPage.kind = page; groupsPage.groups = JSON.parse(library.groupsJson(page)) }
             if (page === "starred") listPage.tracks = JSON.parse(library.starredJson())
             else if (page === "mostplayed") listPage.tracks = JSON.parse(library.mostPlayedJson())
@@ -691,7 +694,8 @@ Window {
                 listPage.tracks = JSON.parse(library.playlistTracksJson(p.id))
             }
         }
-        readonly property string title: page === "album" && album ? album.title
+        readonly property string title: page === "home" ? "Início"
+            : page === "album" && album ? album.title
             : page === "artist" && artist ? artist.name
             : page === "artists" ? "Artistas"
             : page === "starred" ? "Favoritas"
@@ -810,6 +814,14 @@ Window {
         })
     }
     Connections { target: player; function onCurrentChanged() { win.refreshCoverLook() } }
+    // Home page shuffle buttons: a few hundred random songs from the whole
+    // library (or the favourites), with the shuffle button lit.
+    function shuffleLibrary(kind) {
+        var t = JSON.parse(library.shuffleJson(kind, 500))
+        if (!t.length) { toast.show(kind === "starred" ? "Nenhuma favorita ainda" : "Nenhuma música na biblioteca"); return }
+        player.playList(t, 0)
+        player.unshuffled = t.slice(); player.shuffle = true; player.save()
+    }
     function onTrackMenu(t, x, y) { trackMenu.openAt(t, x, y, sidebar.playlists) }
     function onStar(t, s) { library.setStarred(t.id, s); t.starred = s; if (nav.page === "starred") nav.refresh() }
 
@@ -958,6 +970,23 @@ Window {
                     NumberAnimation { target: stackLift; property: "y"; from: Theme.reduceMotion ? 0 : 10; to: 0; duration: Theme.ms(260); easing.type: Easing.OutCubic }
                 }
 
+                HomePage {
+                    id: homePage
+                    anchors.fill: parent
+                    visible: nav.page === "home"
+                    trackCount: library.trackCount
+                    albumCount: library.albumCount
+                    scanning: library.scanning
+                    playingId: player.current ? player.current.id : -1
+                    onShuffle: (kind) => win.shuffleLibrary(kind)
+                    onOpenAlbum: (a) => nav.openAlbum(a)
+                    onPlayAlbum: (a) => { var t = JSON.parse(library.albumTracksJson(a.id)); if (t.length) player.playList(t, 0) }
+                    onOpenArtist: (a) => nav.openArtist(a)
+                    onPlay: (t, i) => player.playList(t, i)
+                    onSeeAll: (p) => nav.root(p)
+                    onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
+                    onStarToggled: (t, s) => win.onStar(t, s)
+                }
                 AlbumGrid {
                     id: albumGrid
                     anchors.fill: parent

@@ -8,7 +8,7 @@ import QtQuick.Layouts
 // Material navigation drawer, Fluent pane over the Mica window.
 Item {
     id: side
-    property string page: "albums"
+    property string page: "home"
     property int playlistId: -1
     property var playlists: []
     property var servers: []
@@ -74,6 +74,11 @@ Item {
             width: parent.width
             spacing: 0
 
+            SidebarRow {
+                width: col.width; icon: "home"; text: "Início"
+                current: side.page === "home"
+                onClicked: side.navigate("home")
+            }
             Section {
                 key: "library"; title: "Biblioteca"
                 rows: [

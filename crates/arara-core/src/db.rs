@@ -755,6 +755,87 @@ impl Db {
         self.tracks_where("t.play_count > 0 ORDER BY t.play_count DESC, t.last_played DESC LIMIT ?1", [limit])
     }
 
+    // ---------- home page ----------
+
+    fn albums_query(&self, join: &str, order: &str, p: impl rusqlite::Params) -> Result<Vec<AlbumRow>> {
+        let sql = format!(
+            "SELECT a.id, a.title, ar.name, a.year, a.cover_hash,
+                    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id), a.artist_id
+             FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id {join} ORDER BY {order}"
+        );
+        let mut st = self.conn.prepare_cached(&sql)?;
+        let rows = st.query_map(p, |r| {
+            Ok(AlbumRow {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                artist: r.get(2)?,
+                year: r.get(3)?,
+                cover_hash: r.get(4)?,
+                track_count: r.get(5)?,
+                artist_id: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Albums with a song played most recently first.
+    pub fn recent_albums(&self, limit: i64) -> Result<Vec<AlbumRow>> {
+        self.albums_query(
+            "JOIN (SELECT album_id, MAX(last_played) AS lp FROM tracks
+                   WHERE last_played IS NOT NULL AND album_id IS NOT NULL GROUP BY album_id) r ON r.album_id = a.id",
+            "r.lp DESC LIMIT ?1",
+            [limit],
+        )
+    }
+
+    /// Albums whose newest song arrived in the library most recently.
+    pub fn added_albums(&self, limit: i64) -> Result<Vec<AlbumRow>> {
+        self.albums_query(
+            "JOIN (SELECT album_id, MAX(added_at) AS ad FROM tracks
+                   WHERE album_id IS NOT NULL GROUP BY album_id) n ON n.album_id = a.id",
+            "n.ad DESC, a.id DESC LIMIT ?1",
+            [limit],
+        )
+    }
+
+    /// Albums not played in the last `days` days (or never), in an order that
+    /// changes with `seed` (the home page passes the day, plus a shuffle count).
+    pub fn rediscover_albums(&self, days: i64, now: i64, seed: i64, limit: i64) -> Result<Vec<AlbumRow>> {
+        self.albums_query(
+            "JOIN (SELECT album_id, MAX(COALESCE(last_played, 0)) AS lp FROM tracks
+                   WHERE album_id IS NOT NULL GROUP BY album_id) r ON r.album_id = a.id
+             WHERE r.lp < ?1",
+            "((a.id + 7) * ?2) % 10007 LIMIT ?3",
+            params![now - days * 86_400, seed.rem_euclid(9_973) + 1, limit],
+        )
+    }
+
+    /// Album artists ranked by how many plays their songs have.
+    pub fn top_artists(&self, limit: i64) -> Result<Vec<ArtistRow>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT ar.id, ar.name, COUNT(DISTINCT a.id),
+                    (SELECT a2.cover_hash FROM albums a2 WHERE a2.artist_id = ar.id AND a2.cover_hash IS NOT NULL
+                     ORDER BY a2.year DESC LIMIT 1),
+                    SUM(t.play_count) AS plays
+             FROM artists ar JOIN albums a ON a.artist_id = ar.id JOIN tracks t ON t.album_id = a.id
+             GROUP BY ar.id HAVING plays > 0 ORDER BY plays DESC, MAX(t.last_played) DESC LIMIT ?1",
+        )?;
+        let rows = st.query_map([limit], |r| {
+            Ok(ArtistRow { id: r.get(0)?, name: r.get(1)?, album_count: r.get(2)?, cover_hash: r.get(3)? })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Random songs from the whole library ("tocar tudo aleatório").
+    pub fn random_tracks(&self, limit: i64) -> Result<Vec<TrackRow>> {
+        self.tracks_where("1 ORDER BY RANDOM() LIMIT ?1", [limit])
+    }
+
+    /// Random favourite songs.
+    pub fn random_starred(&self, limit: i64) -> Result<Vec<TrackRow>> {
+        self.tracks_where("t.starred = 1 ORDER BY RANDOM() LIMIT ?1", [limit])
+    }
+
     /// Tracks by id, in the order given (used to restore the play queue).
     pub fn tracks_by_ids(&self, ids: &[i64]) -> Result<Vec<TrackRow>> {
         let mut out = Vec::with_capacity(ids.len());

@@ -26,6 +26,7 @@ fn main() {
         "qml/ui/LyricsScreen.qml",
         "qml/ui/VolumeSlider.qml",
         "qml/ui/FreePage.qml",
+        "qml/ui/HomePage.qml",
         "qml/ui/RecapPage.qml",
         "qml/ui/RecapStory.qml",
         "qml/ui/SortMenu.qml",
