@@ -544,6 +544,15 @@ impl Db {
                  DELETE FROM kv WHERE k LIKE 'info:%';",
             )?;
         }
+        // 0.7.25 picks the original release instead of any edition (a
+        // Japanese pressing showed up as "the" album): redo album answers once.
+        let matched_v2: bool = conn.prepare("SELECT 1 FROM kv WHERE k = 'info_release_match'")?.exists([])?;
+        if !matched_v2 {
+            conn.execute_batch(
+                "DELETE FROM kv WHERE k LIKE 'info:album:%';
+                 INSERT OR REPLACE INTO kv(k, v) VALUES ('info_release_match', '2');",
+            )?;
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre COLLATE NOCASE);
              CREATE INDEX IF NOT EXISTS tracks_added ON tracks(added_at);",

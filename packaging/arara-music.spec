@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.22
+Version:        0.7.25
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -45,6 +45,22 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.25-1
+- Informações de todos os artistas e álbuns buscadas em segundo plano
+  depois de indexar (MusicBrainz e Wikipédia, uma consulta por segundo),
+  das mais tocadas para as menos tocadas, com contador na barra lateral.
+  Continua de onde parou ao reabrir o app; para sozinha sem internet.
+- As informações ficam salvas junto com as músicas, em arquivos ocultos:
+  .arara-album.json na pasta do álbum e .arara-artist.json (com a foto
+  .arara-artist.jpg) na pasta do artista. Se o banco do app se perder, ou
+  em outro computador com o mesmo disco, tudo volta dos arquivos sem
+  internet. Discos somente leitura ou bloqueados ficam só no cache do app.
+- Álbum certo no MusicBrainz: usa a edição original (a primeira lançada)
+  em vez de qualquer edição, como uma prensagem japonesa com faixa bônus.
+  Código de barras só aparece quando as tags dizem qual edição é a sua.
+- Preferências > Biblioteca: "Buscar de toda a biblioteca" e "Salvar junto
+  com as músicas".
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.22-1
 - Junta as capas animadas à versão 0.7.21.
 - Capas animadas: quando o álbum tem capa animada no Apple Music, ela toca

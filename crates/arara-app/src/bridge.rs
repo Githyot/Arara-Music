@@ -25,6 +25,8 @@ pub mod qobject {
         #[qproperty(QString, accent)]
         #[qproperty(bool, syncing)]
         #[qproperty(QString, lyrics_progress, cxx_name = "lyricsProgress")]
+        /// "Buscando informações 120 de 1300" while artist/album info is fetched in the background.
+        #[qproperty(QString, info_progress, cxx_name = "infoProgress")]
         /// JSON list of music folders that can't be read now (locked/unplugged disk).
         #[qproperty(QString, missing_dirs, cxx_name = "missingDirs")]
         type Library = super::LibraryRust;
@@ -522,8 +524,10 @@ pub struct LibraryRust {
     accent: QString,
     syncing: bool,
     lyrics_progress: QString,
+    info_progress: QString,
     missing_dirs: QString,
     prefetching: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    info_running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: remote::Resolver,
     sync_queue: Vec<i64>,
     db_path: PathBuf,
@@ -564,7 +568,9 @@ impl Default for LibraryRust {
             accent: QString::from("#3584e4"),
             syncing: false,
             lyrics_progress: QString::default(),
+            info_progress: QString::default(),
             prefetching: Default::default(),
+            info_running: Default::default(),
             resolver: remote::Resolver::default(),
             sync_queue: Vec::new(),
             db_path: p.db,
@@ -977,6 +983,7 @@ impl qobject::Library {
                             o.as_mut().playlists_changed();
                         }
                         o.as_mut().prefetch_lyrics();
+                        o.as_mut().prefetch_info();
                     }
                     Err(e) => o.as_mut().set_status(qs(&format!("Erro: {e}"))),
                 }
@@ -1523,64 +1530,120 @@ impl qobject::Library {
             && self.db.as_ref().and_then(|d| d.get_kv("pref:onlineinfo").ok().flatten()).map_or(true, |v| v != "0")
     }
 
+    /// Where info files may go and what may be touched, for worker threads.
+    fn info_options(&self) -> arara_core::infostore::Options {
+        let pref = |k: &str| self.db.as_ref().and_then(|d| d.get_kv(k).ok().flatten());
+        arara_core::infostore::Options {
+            save_files: pref("pref:infofiles").map_or(true, |v| v != "0"),
+            roots: self.library_dirs(),
+            skip: serde_json::from_str(&self.missing_dirs.to_string()).unwrap_or_default(),
+            photo_cache: self.covers_dir.join("web"),
+            online: self.online_allowed(),
+        }
+    }
+
     pub fn request_online_info(self: Pin<&mut Self>, kind: &QString, id: i64, force: bool) {
         let kind = kind.to_string();
         let qt = self.qt_thread();
-        if !self.online_allowed() {
+        if !self.online_allowed() || self.db.is_none() {
             let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs("null")));
             return;
         }
-        let Some(db) = &self.db else { return };
-        // Gather what to search for now (cheap), fetch on a worker thread.
-        enum Job {
-            Track { title: String, artist: String, album: Option<String>, dur: i64, mbid: Option<String> },
-            Album { title: String, artist: String, mbid: Option<String> },
-            Artist { name: String, mbid: Option<String> },
-        }
-        let job = match kind.as_str() {
-            "track" => db.track(id).ok().flatten().map(|t| {
-                let mbid = (!remote::is_remote(&t.path)).then(|| arara_core::info::file_details(&t.path)["mbid"]["recording"].as_str().map(str::to_owned)).flatten();
-                Job::Track { title: t.title, artist: t.artist, album: t.album, dur: t.duration_ms, mbid }
-            }),
-            "album" => db.albums().ok().and_then(|all| all.into_iter().find(|a| a.id == id)).map(|a| {
-                let first = db.album_tracks(id).ok().and_then(|ts| ts.into_iter().find(|t| !remote::is_remote(&t.path)));
-                let mbid = first.and_then(|t| arara_core::info::file_details(&t.path)["mbid"]["release"].as_str().map(str::to_owned));
-                Job::Album { title: a.title, artist: a.artist.unwrap_or_default(), mbid }
-            }),
-            "artist" => {
-                let name: Option<String> = db.conn.query_row("SELECT name FROM artists WHERE id = ?1", [id], |r| r.get(0)).ok();
-                name.map(|n| Job::Artist { name: n, mbid: None })
-            }
-            _ => None,
-        };
-        let Some(job) = job else {
-            let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs("null")));
-            return;
-        };
+        let opts = self.info_options();
         let db_path = self.db_path.clone();
-        let covers = self.covers_dir.join("web");
+        // Everything, even reading tags for MusicBrainz ids, happens on the
+        // worker: the files may sit on a disk that is slow to answer.
         std::thread::spawn(move || {
-            use arara_core::info;
+            use arara_core::{info, infostore};
             let Ok(db) = Db::open(&db_path) else { return };
-            let mut data = match job {
-                Job::Track { title, artist, album, dur, mbid } => {
-                    let key = format!("{artist}\u{1f}{title}\u{1f}{}", album.clone().unwrap_or_default());
-                    info::cached_or_fetch(&db, "track", &key, now(), force, || info::fetch_recording(&title, &artist, album.as_deref(), dur, mbid.as_deref()))
-                }
-                Job::Album { title, artist, mbid } => {
-                    let key = format!("{artist}\u{1f}{title}");
-                    info::cached_or_fetch(&db, "album", &key, now(), force, || info::fetch_album(&title, &artist, mbid.as_deref()))
-                }
-                Job::Artist { name, mbid } => info::cached_or_fetch(&db, "artist", &name, now(), force, || info::fetch_artist(&name, mbid.as_deref())),
+            let send = |v: &serde_json::Value| {
+                let s = v.to_string();
+                let k = kind.clone();
+                let _ = qt.queue(move |o| o.online_info(qs(&k), id, qs(&s)));
             };
-            // Wikipedia photo → local file, so QML loads it from disk like covers.
-            if let Some(img) = data["wiki"]["image"].as_str().map(str::to_owned) {
-                if let Some(p) = info::cache_image(&img, &covers) {
-                    data["photo"] = json!(remote::file_url(&p));
+            match kind.as_str() {
+                "album" => {
+                    let mut d = send;
+                    infostore::album(&db, id, now(), force, &opts, &mut d);
                 }
+                "artist" => {
+                    let mut d = send;
+                    infostore::artist(&db, id, now(), force, &opts, &mut d);
+                }
+                "track" => {
+                    let Some(t) = db.track(id).ok().flatten() else { return send(&serde_json::Value::Null) };
+                    let mbid = (!remote::is_remote(&t.path) && !opts.skip.iter().any(|s| t.path.starts_with(s.as_str())))
+                        .then(|| info::file_details(&t.path)["mbid"]["recording"].as_str().map(str::to_owned))
+                        .flatten();
+                    let key = format!("{}\u{1f}{}\u{1f}{}", t.artist, t.title, t.album.clone().unwrap_or_default());
+                    let data = info::cached_or_fetch(&db, "track", &key, now(), force, || {
+                        info::fetch_recording(&t.title, &t.artist, t.album.as_deref(), t.duration_ms, mbid.as_deref())
+                    });
+                    send(&data);
+                }
+                _ => send(&serde_json::Value::Null),
             }
-            let s = data.to_string();
-            let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs(&s)));
+        });
+    }
+
+    /// After indexing: look up info for every album and artist with local
+    /// files, most played first, and save it next to the music. One run at a
+    /// time; items already done are skipped, so it resumes where it stopped.
+    pub fn prefetch_info(self: Pin<&mut Self>) {
+        use std::sync::atomic::Ordering;
+        if !self.online_allowed() || self.db.is_none() {
+            return;
+        }
+        if self.db.as_ref().and_then(|d| d.get_kv("pref:infoprefetch").ok().flatten()).as_deref() == Some("0") {
+            return;
+        }
+        let running = self.info_running.clone();
+        if running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let opts = self.info_options();
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        let _ = std::thread::Builder::new().name("arara-info".into()).spawn(move || {
+            use arara_core::infostore::{self, Outcome};
+            let run = || {
+                let Ok(db) = Db::open(&db_path) else { return };
+                let list = infostore::prefetch_list(&db);
+                let total = list.len();
+                let (mut done, mut fetched, mut offline_streak) = (0usize, 0usize, 0u32);
+                let mut last_msg = std::time::Instant::now() - std::time::Duration::from_secs(10);
+                for (kind, id) in list {
+                    let mut nothing = |_: &serde_json::Value| {};
+                    let (_, outcome) = if kind == "album" {
+                        infostore::album(&db, id, now(), false, &opts, &mut nothing)
+                    } else {
+                        infostore::artist(&db, id, now(), false, &opts, &mut nothing)
+                    };
+                    done += 1;
+                    match outcome {
+                        Outcome::Fetched => {
+                            fetched += 1;
+                            offline_streak = 0;
+                        }
+                        Outcome::Offline => offline_streak += 1,
+                        Outcome::Missing => offline_streak = 0,
+                        _ => {}
+                    }
+                    if offline_streak >= 8 {
+                        log::info!("info prefetch stopped: offline ({done} of {total})");
+                        break;
+                    }
+                    if matches!(outcome, Outcome::Fetched | Outcome::Missing | Outcome::Offline) || last_msg.elapsed().as_millis() > 500 {
+                        last_msg = std::time::Instant::now();
+                        let msg = format!("Buscando informações {done} de {total}");
+                        let _ = qt.queue(move |o| o.set_info_progress(qs(&msg)));
+                    }
+                }
+                log::info!("info prefetch: {fetched} looked up online, {done} of {total} checked");
+            };
+            run();
+            running.store(false, Ordering::SeqCst);
+            let _ = qt.queue(|o| o.set_info_progress(QString::default()));
         });
     }
 
@@ -2093,6 +2156,10 @@ impl qobject::Library {
     pub fn set_setting(&self, key: &QString, value: &QString) {
         if let Some(d) = &self.db {
             let _ = d.set_kv(&format!("pref:{key}"), &value.to_string());
+        }
+        // Turning info lookups (back) on starts the background run.
+        if matches!(key.to_string().as_str(), "onlineinfo" | "infoprefetch" | "infofiles") && value.to_string() == "1" {
+            let _ = self.qt_thread().queue(|o| o.prefetch_info());
         }
     }
 

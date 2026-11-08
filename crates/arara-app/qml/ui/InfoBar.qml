@@ -257,7 +257,7 @@ Rectangle {
                 rows: bar.factRows
                 busy: bar.loading
                 busyText: bar.isArtist ? "Buscando o artista no MusicBrainz…" : "Buscando o álbum no MusicBrainz…"
-                note: bar.online ? "Fontes: MusicBrainz" + (bar.online.wiki ? " e Wikipédia" : "") : ""
+                note: bar.online ? "Fontes: MusicBrainz" + (bar.online.wiki ? " e Wikipédia" : "") + (bar.online.saved ? " · salvo na pasta das músicas" : "") : ""
             }
             Text {
                 visible: !bar.loading && !bar.online

@@ -8,6 +8,7 @@ pub mod db;
 pub mod edit;
 pub mod import;
 pub mod info;
+pub mod infostore;
 pub mod lyrics;
 pub mod motion;
 pub mod natural;

@@ -446,6 +446,24 @@ Item {
                             checked: dlg.get("onlineinfo")
                             onToggled: dlg.set("onlineinfo", !checked)
                         }
+                        SwitchRow {
+                            title: "Buscar de toda a biblioteca"
+                            subtitle: dlg.get("onlineinfo")
+                                ? (library.infoProgress ? library.infoProgress + ". " : "") + "Procura em segundo plano todos os artistas e álbuns, uma consulta por segundo, para as páginas abrirem já carregadas. Continua de onde parou ao reabrir o app"
+                                : "Ligue “Buscar informações online” para usar"
+                            enabled: dlg.get("onlineinfo")
+                            opacity: enabled ? 1 : 0.5
+                            checked: dlg.get("infoprefetch")
+                            onToggled: dlg.set("infoprefetch", !checked)
+                        }
+                        SwitchRow {
+                            title: "Salvar junto com as músicas"
+                            subtitle: "Guarda as informações num arquivo oculto na pasta de cada álbum e artista (.arara-album.json, .arara-artist.json e a foto), assim elas continuam lá mesmo se o app for reinstalado. Em discos somente leitura, ficam só no app"
+                            enabled: dlg.get("onlineinfo")
+                            opacity: enabled ? 1 : 0.5
+                            checked: dlg.get("infofiles")
+                            onToggled: dlg.set("infofiles", !checked)
+                        }
                     }
                     Group {
                         visible: dlg.page === "library"
