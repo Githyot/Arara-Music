@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.38
+Version:        0.7.39
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -48,6 +48,16 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.39-1
+- Tabs: slide X/Y (sobe, ex.: 8/10) e X\Y (desce), com linha diagonal ligando
+  as notas na tab e na partitura; no editor de tab, teclas / e \, botão
+  "Slide" e campo "Slide até a casa".
+- Estudos: dá para excluir as cifras de exemplo (continuam excluídas ao
+  reabrir; "Restaurar exemplos" em Ajustes) e apagar as suas pela lista.
+- Cifra aberta pela aba Estudos com a música na biblioteca: botão
+  "Estudar com a música" (abre o modo Estudar com a faixa).
+- "Editar cifra" no modo Estudar abre a cifra no editor (abria vazio).
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.38-1
 - Estudos: cabeçalho da cifra sem sobreposição (título corta com "…") e
   botões com fundo; botão para esconder o player na aba Estudos.

@@ -17,6 +17,9 @@ Rectangle {
     // Dentro do modo Estudar do Arara Music: a barra de cima e a letra ficam
     // com a tela de estudo, e a parte que está tocando fica em destaque.
     property bool embedded: false
+    // Faixa da biblioteca do Arara que combina com esta cifra (null se não tem):
+    // dá para abrir o modo Estudar com a música tocando junto.
+    readonly property var libraryTrack: !embedded && song && Examples.trackFinder ? Examples.trackFinder(song) : null
     property int activeSection: -1
     property bool followSection: true
     property bool concealActive: false     // treino de ouvido
@@ -384,6 +387,13 @@ Rectangle {
             visible: !page.embedded
             Layout.fillWidth: true
             title: page.song ? page.song.title : ""
+            AppButton {
+                visible: !!page.libraryTrack
+                text: "Estudar com a música"
+                iconName: "play"
+                suggested: true
+                onClicked: Examples.studyRequested(page.libraryTrack, page.song)
+            }
             AppButton {
                 text: page.song && page.song.id ? "Editar" : "Editar uma cópia"
                 flat: false

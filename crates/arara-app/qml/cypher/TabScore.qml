@@ -209,6 +209,9 @@ Canvas {
 
             var x = clefW
             var stems = []
+            // Última nota de cada corda nesta linha (na tab e na pauta), para
+            // ligar o slide "8/10" com uma linha diagonal.
+            var lastTab = {}, lastHead = {}
             for (var i = 0; i < row.length; ++i) {
                 var ev = row[i]
                 if (ev.bar) {
@@ -249,13 +252,35 @@ Canvas {
                         ctx.fillStyle = Theme.fretColor(n.fret)
                         ctx.fillText(label2, cx - tw / 2, tyy + 4)
                     }
-                    if (n.tech) {
+                    var slideT = n.tech === "/" || n.tech === "\\"
+                    if (slideT) {
+                        // Slide: linha diagonal da nota anterior da corda até esta,
+                        // subindo (/) ou descendo (\\). Sem nota antes, entra de fora.
+                        var up = n.tech === "/"
+                        var pv = lastTab[n.string]
+                        var x1 = pv ? pv.x + pv.w / 2 + 2 : cx - slotW / 2 - 4
+                        var x2 = cx - tw / 2 - 2
+                        if (x2 - x1 < 6) x1 = x2 - 6
+                        ctx.strokeStyle = accent
+                        ctx.lineWidth = 1.8
+                        ctx.beginPath()
+                        ctx.moveTo(x1, tyy + (up ? 4 : -4))
+                        ctx.lineTo(x2, tyy + (up ? -4 : 4))
+                        ctx.stroke()
+                        if (!pv || cx - pv.x > slotW * 1.5) {
+                            ctx.fillStyle = accent
+                            ctx.font = "9px sans-serif"
+                            ctx.fillText("sl.", (x1 + x2) / 2 - 6, tyy - 7)
+                        }
+                        ctx.font = "bold 11px sans-serif"
+                    } else if (n.tech) {
                         ctx.fillStyle = accent
                         ctx.font = "10px sans-serif"
-                        var tl = n.tech === "/" || n.tech === "\\" ? n.tech : n.tech.toUpperCase()
-                        ctx.fillText(tl, cx - slotW / 2 - 2, tyy - 6)
+                        ctx.fillText(n.tech.toUpperCase(), cx - slotW / 2 - 2, tyy - 6)
                         ctx.font = "bold 11px sans-serif"
                     }
+                    if (n.fret !== 255) lastTab[n.string] = { x: cx, w: tw }
+                    else delete lastTab[n.string]
                 }
                 // Direção da palhetada embaixo da tab.
                 if (editing) {
@@ -334,6 +359,17 @@ Canvas {
                     }
                     var nx = (sp.step - prevStep === 1) ? cx + 6 : cx
                     prevStep = sp.step
+                    if (note.tech === "/" || note.tech === "\\") {
+                        // Slide na pauta: linha reta de uma cabeça de nota à outra.
+                        var ph = lastHead[note.string]
+                        ctx.strokeStyle = accent
+                        ctx.lineWidth = 1.6
+                        ctx.beginPath()
+                        if (ph) { ctx.moveTo(ph.x + 7, ph.y); ctx.lineTo(nx - 8, y) }
+                        else { ctx.moveTo(nx - 18, y + (note.tech === "/" ? 6 : -6)); ctx.lineTo(nx - 8, y) }
+                        ctx.stroke()
+                    }
+                    lastHead[note.string] = { x: nx, y: y }
                     ctx.fillStyle = accent
                     ctx.save()
                     ctx.translate(nx, y); ctx.rotate(-0.35); ctx.scale(1.35, 1)

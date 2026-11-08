@@ -109,8 +109,10 @@ Column {
     function setNote(string, fret) {
         ensure()
         var e = model[curS].events[curE]
+        var had = e.notes.filter(function (n) { return n.string === string })[0]
         e.notes = e.notes.filter(function (n) { return n.string !== string })
-        if (fret >= 0) e.notes.push({ string: string, fret: fret })
+        // Trocar a casa de uma nota com slide mantém o slide.
+        if (fret >= 0) e.notes.push(had && had.tech && fret !== muted ? { string: string, fret: fret, tech: had.tech } : { string: string, fret: fret })
         e.notes.sort(function (a, b) { return a.string - b.string })
         commit()
     }
@@ -146,7 +148,9 @@ Column {
             typed = typedTimer.running && typed.length === 1 && parseInt(typed + d) <= 24 ? typed + d : d
             typedTimer.restart()
             setNote(curString, Math.min(24, parseInt(typed)))
-        } else if (e.key === Qt.Key_X) { typed = ""; setNote(curString, root.muted) }
+        } else if (e.key === Qt.Key_Slash || e.text === "/") { typed = ""; toggleSlide("/") }
+        else if (e.key === Qt.Key_Backslash || e.text === "\\") { typed = ""; toggleSlide("\\") }
+        else if (e.key === Qt.Key_X) { typed = ""; setNote(curString, root.muted) }
         else if (e.key === Qt.Key_Backspace || e.key === Qt.Key_Delete) setNote(curString, -1)
         else if (e.key === Qt.Key_Left) step(-1)
         else if (e.key === Qt.Key_Right) step(1)
@@ -226,6 +230,43 @@ Column {
         curS = model.length - 1; curE = 0
         commit()
     }
+    // ---- Slide (X/Y sobe, X\\Y desce) ----
+    // Toque anterior com nota nesta corda (-1 se não houver).
+    function prevNoteEvent(s, e, string) {
+        for (var p = e - 1; p >= 0; --p)
+            for (var q = 0; q < s.events[p].notes.length; ++q)
+                if (s.events[p].notes[q].string === string && s.events[p].notes[q].fret !== muted) return p
+        return -1
+    }
+    function noteHere() {
+        var e = ev(); if (!e) return null
+        return e.notes.filter(function (n) { return n.string === curString })[0] || null
+    }
+    readonly property string slideHere: rev, noteHere() ? (noteHere().tech === "/" || noteHere().tech === "\\" ? noteHere().tech : "") : ""
+    // Liga a nota escolhida à nota de antes da mesma corda com um slide.
+    // dir: "/" ou "\\"; vazio escolhe pela casa (mais alta = sobe). De novo tira.
+    function toggleSlide(dir) {
+        var n = noteHere(); if (!n || n.fret === muted) return
+        if (n.tech === "/" || n.tech === "\\") {
+            if (!dir || dir === n.tech) { n.tech = ""; commit(); return }
+        }
+        if (!dir) {
+            var s = sys(), pe = prevNoteEvent(s, curE, curString)
+            var pf = pe >= 0 ? s.events[pe].notes.filter(function (x) { return x.string === curString })[0].fret : -1
+            dir = pf >= 0 && pf > n.fret ? "\\" : "/"
+        }
+        n.tech = dir
+        commit()
+    }
+    // "8/10" de uma vez: põe um toque depois com a casa de destino ligada por slide.
+    function slideTo(fret) {
+        var n = noteHere(); if (!n || n.fret === muted) return
+        var from = n.fret
+        insert(true)
+        var e = model[curS].events[curE]
+        e.notes = [{ string: curString, fret: fret, tech: fret >= from ? "/" : "\\" }]
+        commit()
+    }
     function moveNote(s1, e1, string1, s2, e2, string2) {
         var a = model[s1].events[e1]
         var n = a.notes.filter(function (x) { return x.string === string1 })[0]
@@ -266,7 +307,7 @@ Column {
     Text {
         width: parent.width
         wrapMode: Text.WordWrap
-        text: "Toque numa corda de um toque e digite a casa (dois números seguidos = 10, 11...). X = corda abafada (não tocar), Delete tira, setas ←→ andam nos toques e ↑↓ nas cordas, + põe um toque depois, − exclui. Arraste uma nota para outra corda ou toque; arraste o topo da coluna para mudar o toque de lugar. Toque embaixo para pôr a seta.\nCopiar e colar: Shift+clique (ou Shift+setas) escolhe vários toques; Ctrl+C copia, Ctrl+X recorta, Ctrl+V cola depois do toque escolhido (vale de uma parte para outra)."
+        text: "Toque numa corda de um toque e digite a casa (dois números seguidos = 10, 11...). X = corda abafada (não tocar), Delete tira, setas ←→ andam nos toques e ↑↓ nas cordas, + põe um toque depois, − exclui. Arraste uma nota para outra corda ou toque; arraste o topo da coluna para mudar o toque de lugar. Toque embaixo para pôr a seta.\nSlide: escolha a nota de chegada e aperte / (sobe, 8/10) ou \\ (desce, 10\\8); ela fica ligada à nota de antes da mesma corda. O campo “Slide até” põe a nota de chegada de uma vez.\nCopiar e colar: Shift+clique (ou Shift+setas) escolhe vários toques; Ctrl+C copia, Ctrl+X recorta, Ctrl+V cola depois do toque escolhido (vale de uma parte para outra)."
         color: Theme.textDim
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSize - 2
@@ -401,11 +442,25 @@ Column {
                                     color: open ? Theme.card : Qt.rgba(ink.r, ink.g, ink.b, 0.14)
                                     border.width: open ? 2 : 1.4
                                     border.color: open ? Theme.textDim : ink
+                                    // Slide: linha diagonal desde a nota de antes nesta corda.
+                                    readonly property bool slide: modelData.tech === "/" || modelData.tech === "\\"
+                                    readonly property int prevE: slide ? root.prevNoteEvent(sysItem.modelData, col.index, modelData.string) : -1
+                                    SlideLine {
+                                        visible: parent.slide
+                                        color: Theme.accent
+                                        up: parent.modelData.tech === "/"
+                                        rise: 10
+                                        midY: parent.height / 2
+                                        toX: -1
+                                        fromX: parent.prevE >= 0
+                                               ? parent.width / 2 - (root.colX(sysItem.index, col.index) - root.colX(sysItem.index, parent.prevE)) + 11
+                                               : -12
+                                    }
                                     Text {
                                         id: t
                                         visible: !parent.open
                                         anchors.centerIn: parent
-                                        text: (parent.modelData.tech || "") + (parent.modelData.fret === root.muted ? "x" : parent.modelData.fret)
+                                        text: (parent.slide ? "" : (parent.modelData.tech || "")) + (parent.modelData.fret === root.muted ? "x" : parent.modelData.fret)
                                         color: parent.ink
                                         font.family: Theme.fontFamily
                                         font.pixelSize: 12
@@ -507,6 +562,12 @@ Column {
         AppButton { text: "Toque antes"; iconName: "add"; onClicked: root.insert(false) }
         AppButton { text: "Toque depois"; iconName: "add"; onClicked: root.insert(true) }
         AppButton { text: "x (não tocar)"; enabled: !!root.current; onClicked: { root.forceActiveFocus(); root.setNote(root.curString, root.muted) } }
+        AppButton {
+            text: "╱ Slide"
+            enabled: root.rev, !!root.noteHere()
+            suggested: root.slideHere !== ""
+            onClicked: { root.forceActiveFocus(); root.toggleSlide("") }
+        }
         AppButton { text: "Duplicar"; enabled: !!root.current; onClicked: root.duplicate() }
         AppButton { text: "Excluir toque"; enabled: !!root.current; onClicked: root.remove() }
         // Seta do toque: escolhe direto (abafada = ↓× / ↑×).
@@ -563,6 +624,25 @@ Column {
             placeholderText: "ex.: Am"
             text: root.rev, root.sys() ? root.chordAt(root.sys(), root.curE) : ""
             onEditingFinished: if (text.trim() !== (root.sys() ? root.chordAt(root.sys(), root.curE) : "")) root.setChord(text)
+        }
+        Text {
+            Layout.leftMargin: 12
+            text: "Slide até a casa"
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize - 1
+        }
+        AppTextField {
+            id: slideField
+            Layout.preferredWidth: 84
+            mono: true
+            enabled: root.rev, !!root.noteHere()
+            placeholderText: "ex.: 10"
+            validator: IntValidator { bottom: 0; top: 24 }
+            onAccepted: {
+                if (text.length) { root.slideTo(parseInt(text)); text = "" }
+                root.forceActiveFocus()
+            }
         }
         Item { Layout.fillWidth: true }
     }

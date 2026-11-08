@@ -27,6 +27,7 @@
     <file alias="ScoreRow.qml">qml/cypher/ScoreRow.qml</file>
     <file alias="SectionTitle.qml">qml/cypher/SectionTitle.qml</file>
     <file alias="SectionView.qml">qml/cypher/SectionView.qml</file>
+    <file alias="SlideLine.qml">qml/cypher/SlideLine.qml</file>
     <file alias="SegmentedControl.qml">qml/cypher/SegmentedControl.qml</file>
     <file alias="SettingsPage.qml">qml/cypher/SettingsPage.qml</file>
     <file alias="SongPage.qml">qml/cypher/SongPage.qml</file>

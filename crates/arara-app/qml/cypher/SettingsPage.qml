@@ -44,6 +44,32 @@ Rectangle {
                 }
 
                 Item { width: 1; height: 12 }
+                SectionTitle { text: "Exemplos" }
+
+                Card {
+                    width: parent.width
+                    RowLayout {
+                        width: parent.width
+                        spacing: 12
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            text: Examples.hidden.length === 0
+                                  ? "Todas as cifras de exemplo estão na lista. Dá para excluir uma pelo ícone de lixeira em Cifras."
+                                  : Examples.hidden.length + (Examples.hidden.length === 1 ? " exemplo excluído." : " exemplos excluídos.")
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize
+                        }
+                        AppButton {
+                            text: "Restaurar exemplos"
+                            enabled: Examples.hidden.length > 0
+                            onClicked: Examples.restoreExamples()
+                        }
+                    }
+                }
+
+                Item { width: 1; height: 12 }
                 SectionTitle { text: "Sobre" }
 
                 Card {

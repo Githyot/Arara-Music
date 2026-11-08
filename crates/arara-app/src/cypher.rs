@@ -42,6 +42,11 @@ pub mod qobject {
         #[cxx_name = "isChord"]
         fn is_chord(&self, name: &QString) -> bool;
 
+        /// Verdadeiro se a cifra (título, artista) é da faixa (título, artista).
+        #[qinvokable]
+        #[cxx_name = "sheetMatches"]
+        fn sheet_matches(&self, sheet_title: &QString, sheet_artist: &QString, title: &QString, artist: &QString) -> bool;
+
         /// Lê uma tablatura em texto e devolve os eventos (notas e barras) em JSON.
         #[qinvokable]
         #[cxx_name = "parseTab"]
@@ -152,7 +157,7 @@ pub mod qobject {
         /// "Estudar"; uma cópia salva com o mesmo nome tem preferência.
         #[qinvokable]
         #[cxx_name = "setExamples"]
-        fn set_examples(&self, json: &QString);
+        fn set_examples(self: Pin<&mut Self>, json: &QString);
     }
 }
 
@@ -207,6 +212,10 @@ impl qobject::CypherMusic {
 
     pub fn is_chord(&self, name: &QString) -> bool {
         name.to_string().parse::<Chord>().is_ok()
+    }
+
+    pub fn sheet_matches(&self, sheet_title: &QString, sheet_artist: &QString, title: &QString, artist: &QString) -> bool {
+        matching::matches(&sheet_title.to_string(), &sheet_artist.to_string(), &title.to_string(), &artist.to_string())
     }
 
     pub fn parse_tab(&self, text: &QString) -> QString {
@@ -387,10 +396,13 @@ impl qobject::CypherLibrary {
         })
     }
 
-    pub fn set_examples(&self, json: &QString) {
+    pub fn set_examples(mut self: Pin<&mut Self>, json: &QString) {
         let list: Vec<serde_json::Value> = serde_json::from_str(&json.to_string()).unwrap_or_default();
         *self.rust().examples.borrow_mut() = list;
         *self.rust().index.borrow_mut() = None;
+        // Quem pergunta "tem cifra?" lê de novo.
+        let next = self.revision() + 1;
+        self.as_mut().set_revision(next);
     }
 
     pub fn has_sheet(&self, title: &QString, artist: &QString) -> bool {

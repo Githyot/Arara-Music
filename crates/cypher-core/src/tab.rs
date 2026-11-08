@@ -520,6 +520,21 @@ pub fn render(systems: &[EditSystem]) -> String {
                 pos += 3;
             }
             let token = |n: &TabNote| n.label();
+            // Slide de uma nota só para outra na mesma corda: fica colado, como
+            // se escreve à mão ("8/10", "10\\8"), sem traços no meio.
+            let slide = i > 0
+                && !sys.bars.contains(&i)
+                && ev.notes.len() == 1
+                && (ev.notes[0].tech == "/" || ev.notes[0].tech == "\\")
+                && sys.events[i - 1].notes.len() == 1
+                && sys.events[i - 1].notes[0].string == ev.notes[0].string
+                && sys.events[i - 1].notes[0].fret != MUTED;
+            if slide && lines.iter().all(|l| l.ends_with("---")) {
+                for l in lines.iter_mut() {
+                    l.truncate(l.len() - 3);
+                }
+                pos -= 3;
+            }
             let w = ev
                 .notes
                 .iter()
@@ -749,6 +764,23 @@ E|-----------------------|";
             frets(&ev),
             ["1:8", "1:8", "2:6", "3:8", "3:6", "3:5", "2:8", "2:/10"]
         );
+    }
+
+    #[test]
+    fn slides_stay_glued_when_rendered() {
+        let text = "e|--------|\nB|--8/10--|\nG|--------|\nD|--------|\nA|--------|\nE|--------|";
+        let m = edit_model(text);
+        let ev = &m[0].events;
+        assert_eq!(ev.len(), 2);
+        assert_eq!(ev[1].notes[0].tech, "/");
+        let out = render(&m);
+        assert!(out.contains("8/10"), "{out}");
+        let back = edit_model(&out);
+        assert_eq!(back, m);
+        // Descendo.
+        let down = text.replace("8/10", "10\\8-");
+        let out = render(&edit_model(&down));
+        assert!(out.contains("10\\8"), "{out}");
     }
 
     #[test]

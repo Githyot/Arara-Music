@@ -57,7 +57,7 @@ Rectangle {
 
                 Repeater {
                     model: [{ title: "Minhas cifras", songs: page.mySongs },
-                            { title: "Exemplos", songs: Examples.songs }]
+                            { title: "Exemplos", songs: Examples.visibleSongs, examples: true }]
                     Column {
                         id: group
                         required property var modelData
@@ -71,6 +71,7 @@ Rectangle {
                     Card {
                         id: songCard
                         required property var modelData
+                        property bool asking: false
                         width: list.width
                         padding: 12
 
@@ -111,6 +112,32 @@ Rectangle {
                                     font.pixelSize: Theme.fontSize - 1
                                 }
                             }
+                            // Excluir: exemplo some da lista (volta em Ajustes); cifra
+                            // própria pede confirmação e apaga de vez.
+                            AppButton {
+                                id: delButton
+                                iconName: "trash"
+                                flat: true
+                                z: 2
+                                visible: !songCard.asking
+                                onClicked: {
+                                    if (group.modelData.examples) Examples.hideExample(songCard.modelData)
+                                    else songCard.asking = true
+                                }
+                            }
+                            AppButton {
+                                visible: songCard.asking
+                                z: 2
+                                text: "Apagar"
+                                onClicked: { songCard.asking = false; Arara.CypherLibrary.remove(songCard.modelData.id) }
+                            }
+                            AppButton {
+                                visible: songCard.asking
+                                z: 2
+                                text: "Não"
+                                flat: true
+                                onClicked: songCard.asking = false
+                            }
                             Text {
                                 text: "›"
                                 color: Theme.textDim
@@ -121,6 +148,7 @@ Rectangle {
                         MouseArea {
                             parent: songCard
                             anchors.fill: parent
+                            anchors.rightMargin: songCard.asking ? 200 : 90
                             cursorShape: Qt.PointingHandCursor
                             onClicked: page.openSong = songCard.modelData
                         }
@@ -130,6 +158,14 @@ Rectangle {
                 }
 
                 Item { width: 1; height: 16 }
+
+                AppButton {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: Examples.hidden.length > 0
+                    flat: true
+                    text: Examples.visibleSongs.length === 0 ? "Restaurar os exemplos" : "Restaurar exemplos excluídos (" + Examples.hidden.length + ")"
+                    onClicked: Examples.restoreExamples()
+                }
 
                 Text {
                     width: parent.width

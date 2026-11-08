@@ -206,10 +206,31 @@ Item {
                                 height: root.rowH - 2
                                 radius: height / 2
                                 color: "transparent"
+                                // Slide (8/10, 10\\8): linha diagonal desde a nota de antes na corda.
+                                readonly property bool slide: modelData.tech === "/" || modelData.tech === "\\"
+                                readonly property int prevCol: {
+                                    if (!slide) return -1
+                                    var evs = sysBox.modelData.events
+                                    for (var p = ev.index - 1; p >= 0; --p)
+                                        for (var q = 0; q < evs[p].notes.length; ++q)
+                                            if (evs[p].notes[q].string === modelData.string && evs[p].notes[q].fret !== 255) return evs[p].col
+                                    return -1
+                                }
+                                SlideLine {
+                                    visible: parent.slide
+                                    color: Theme.accent
+                                    up: parent.modelData.tech === "/"
+                                    rise: parent.height * 0.5
+                                    midY: parent.height / 2
+                                    toX: -1
+                                    fromX: parent.prevCol >= 0
+                                           ? parent.width / 2 - (ev.modelData.col - parent.prevCol) * sysBox.cw + 10 * root.zoom
+                                           : -10 * root.zoom
+                                }
                                 Text {
                                     id: noteText
                                     anchors.centerIn: parent
-                                    text: (modelData.tech || "") + (modelData.fret === 255 ? "x" : modelData.fret)
+                                    text: (parent.slide ? "" : (modelData.tech || "")) + (modelData.fret === 255 ? "x" : modelData.fret)
                                     color: ev.active ? Theme.chord : Theme.text
                                     font.family: Theme.fontFamily
                                     font.pixelSize: (ev.active ? 19 : 16) * root.zoom

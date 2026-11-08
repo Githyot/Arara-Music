@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import Qt.labs.settings
 import AraraCypher
 import io.github.arara as Arara
 
@@ -16,6 +17,29 @@ import io.github.arara as Arara
 //             apelido depois de "@" (ex.: "Gm7@2"); o "@..." não aparece na tela.
 //             Acorde sem forma aqui usa a forma calculada pelo app.
 QtObject {
+    id: examples
+    // Exemplos que a pessoa excluiu da lista (pelo título). Ficam excluídos ao
+    // reabrir o app; "Restaurar exemplos" em Ajustes traz de volta.
+    property string hiddenJson: "[]"
+    property Settings _settings: Settings {
+        category: "cypher-examples"
+        property alias hidden: examples.hiddenJson
+    }
+    readonly property var hidden: { try { return JSON.parse(hiddenJson) } catch (e) { return [] } }
+    readonly property var visibleSongs: songs.filter(function (s) { return hidden.indexOf(s.title) < 0 })
+    function hideExample(song) {
+        if (!song || hidden.indexOf(song.title) >= 0) return
+        hiddenJson = JSON.stringify(hidden.concat([song.title]))
+    }
+    function restoreExamples() { hiddenJson = "[]" }
+    // Exemplos excluídos também deixam de valer para as músicas da biblioteca.
+    onVisibleSongsChanged: Arara.CypherLibrary.setExamples(JSON.stringify(visibleSongs))
+
+    // Ligação com o Arara Music: acha a faixa da biblioteca de uma cifra
+    // (function(sheet) -> faixa ou null) e pede o modo Estudar.
+    property var trackFinder: null
+    signal studyRequested(var track, var sheet)
+
     // Toques copiados no editor visual da tab (vale entre as partes).
     property var tabClip: []
 

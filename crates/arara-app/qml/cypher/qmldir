@@ -25,6 +25,7 @@ PracticePage 1.0 PracticePage.qml
 ScoreRow 1.0 ScoreRow.qml
 SectionTitle 1.0 SectionTitle.qml
 SectionView 1.0 SectionView.qml
+SlideLine 1.0 SlideLine.qml
 SegmentedControl 1.0 SegmentedControl.qml
 SettingsPage 1.0 SettingsPage.qml
 SongPage 1.0 SongPage.qml

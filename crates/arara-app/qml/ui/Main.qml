@@ -122,9 +122,25 @@ Window {
         return j ? JSON.parse(j) : null
     }
     // Exemplos do Cypher contam como cifra (lidos uma vez, é só texto).
-    Component.onCompleted: CypherLibrary.setExamples(JSON.stringify(Cypher.Examples.songs))
-    function studyTrack(t) {
-        var sheet = sheetFor(t)
+    Component.onCompleted: {
+        CypherLibrary.setExamples(JSON.stringify(Cypher.Examples.visibleSongs))
+        Cypher.Examples.trackFinder = win.trackForSheet
+    }
+    Connections {
+        target: Cypher.Examples
+        function onStudyRequested(track, sheet) { win.studyTrack(track, sheet) }
+    }
+    // Faixa da biblioteca que combina com a cifra (mesma regra de título e artista).
+    function trackForSheet(sheet) {
+        if (!sheet || !sheet.title) return null
+        CypherLibrary.revision   // relê quando a biblioteca de cifras muda
+        var found = JSON.parse(library.searchJson(sheet.title))
+        for (var i = 0; i < found.length; ++i)
+            if (CypherMusic.sheetMatches(sheet.title, sheet.artist || "", found[i].title || "", found[i].artist || "")) return found[i]
+        return null
+    }
+    function studyTrack(t, chosen) {
+        var sheet = chosen || sheetFor(t)
         if (!sheet) {
             // Sem cifra: abre o editor do Cypher já com o nome da música.
             nav.root("studies")
@@ -144,6 +160,12 @@ Window {
         win.lyricsMode = false
         nav.go("practice")
         nav.section = "practice"
+    }
+    // "Editar cifra" no modo Estudar: abre a cifra no editor da aba Estudos.
+    function editStudySheet(sh) {
+        nav.root("studies")
+        studiesLoader.active = true
+        if (studiesLoader.item) studiesLoader.item.editSheet(sh)
     }
     function leavePractice() {
         practiceBacking = true
@@ -1211,7 +1233,8 @@ Window {
                         onTogglePlay: player.togglePlay()
                         onRequestRate: (r) => { if (win.rateBeforePractice < 0) win.rateBeforePractice = Prefs.playbackRate; win.setRate(r) }
                         onRequestBacking: (on) => win.practiceBacking = on
-                        onEditSheet: (sh) => { nav.root("studies"); studiesLoader.active = true; Qt.callLater(function () { if (studiesLoader.item) studiesLoader.item.editSheet(sh) }) }
+                        // O Loader do Estudar some ao trocar de página: quem abre o editor é a janela.
+                        onEditSheet: (sh) => Qt.callLater(win.editStudySheet, sh)
                     }
                 }
                 InfoPage {

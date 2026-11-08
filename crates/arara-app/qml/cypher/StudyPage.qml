@@ -85,7 +85,7 @@ Rectangle {
         Arara.CypherLibrary.revision
         var mine = []
         try { mine = JSON.parse(Arara.CypherLibrary.songs()) } catch (e) {}
-        return mine.concat(Examples.songs)
+        return mine.concat(Examples.visibleSongs)
     }
     // Acordes para treinar, em ordem (da parte escolhida ou da música inteira).
     readonly property var sequence: {

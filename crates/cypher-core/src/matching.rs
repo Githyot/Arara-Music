@@ -55,6 +55,12 @@ fn artist_matches(sheet: &str, track: &str) -> bool {
     a.iter().any(|x| b.iter().any(|y| x == y || x.contains(y.as_str()) || y.contains(x.as_str())))
 }
 
+/// A cifra (título, artista) é desta faixa?
+pub fn matches(sheet_title: &str, sheet_artist: &str, title: &str, artist: &str) -> bool {
+    let a = clean_title(sheet_title);
+    !a.is_empty() && a == clean_title(title) && artist_matches(sheet_artist, artist)
+}
+
 pub struct Index {
     by_title: HashMap<String, Vec<Value>>,
 }
