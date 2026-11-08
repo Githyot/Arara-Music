@@ -45,6 +45,8 @@
     <file alias="icons/search.svg">qml/style/icons/search.svg</file>
     <file alias="icons/shuffle.svg">qml/style/icons/shuffle.svg</file>
     <file alias="icons/songs.svg">qml/style/icons/songs.svg</file>
+    <file alias="icons/excerpt.svg">qml/style/icons/excerpt.svg</file>
+    <file alias="icons/excerpt-mark.svg">qml/style/icons/excerpt-mark.svg</file>
     <file alias="icons/star.svg">qml/style/icons/star.svg</file>
     <file alias="icons/station.svg">qml/style/icons/station.svg</file>
     <file alias="icons/web.svg">qml/style/icons/web.svg</file>
