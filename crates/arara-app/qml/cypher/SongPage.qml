@@ -541,8 +541,8 @@ Rectangle {
                         spacing: 8
                         SegmentedControl {
                             model: [{ value: "all", label: "Tudo" },
-                                    { value: "names", label: "Nomes" },
-                                    { value: "score", label: "Partitura" }]
+                                    { value: "names", label: "Nomes" }]
+                            // "Partitura" saiu (0.7.41): o "Tudo" já mostra a partitura.
                             current: page.viewMode
                             onActivated: (v) => page.viewMode = v
                         }
@@ -689,9 +689,11 @@ Rectangle {
                 }
 
                 // ---- Batidas (fechadas: só as setas) ----
+                // Escondida no Arara Music: cada parte já mostra a batida na tab
+                // (pedido do HP na 0.7.41). A batida se edita no editor.
                 Collapsible {
                     id: strumsGroup
-                    visible: page.usedStrums.length > 0 && prefs.showStrums
+                    visible: false
                     width: parent.width
                     title: page.usedStrums.length > 1 ? "Batidas" : "Batida"
                     expanded: false

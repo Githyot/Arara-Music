@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.40
+Version:        0.7.41
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -48,6 +48,10 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.41-1
+- Cifra: sem a seção "Batida" geral no topo (cada parte já mostra a batida
+  na tab) e sem o botão "Partitura" (o "Tudo" já mostra a partitura).
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.40-1
 - Editor de cifra: "Duplicar parte" copia a parte inteira (acordes, batida,
   tab e repetições) logo depois dela.

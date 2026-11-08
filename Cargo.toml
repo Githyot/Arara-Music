@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/arara-core", "crates/arara-cli", "crates/arara-app", "crates/cypher-core"]
 
 [workspace.package]
-version = "0.7.40"
+version = "0.7.41"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
