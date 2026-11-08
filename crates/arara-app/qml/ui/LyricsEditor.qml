@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Lyrics editor in two steps:
 //  1. "Texto": paste or type the lyrics, one line per sung line.
@@ -124,6 +125,7 @@ Rectangle {
         radius: Theme.cardRadius; color: Theme.cardBg
         border.color: editor.activeFocus ? Theme.accent : Theme.border; border.width: editor.activeFocus ? 2 : 1
         Flickable {
+            QQC.ScrollBar.vertical: OverlayScrollBar {}
             id: flick
             anchors.fill: parent; anchors.margins: 14
             contentHeight: editor.implicitHeight
@@ -142,6 +144,7 @@ Rectangle {
 
     // ---- step 2: sync ----
     ListView {
+        QQC.ScrollBar.vertical: OverlayScrollBar {}
         id: list
         visible: ed.step === "sync"
         anchors { left: parent.left; right: parent.right; top: switcher.bottom; bottom: syncBar.top; topMargin: 12 }

@@ -45,6 +45,19 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.27-1
+- Versão única com a 0.7.23 (mixagem inteligente), a 0.7.24 (letras ao
+  lado das músicas), a 0.7.25 (informações de artistas e álbuns salvas
+  junto com as músicas) e a 0.7.26 (lista de álbuns com capa animada).
+- Capas animadas também na tela da letra, e no painel mesmo com a página
+  do mesmo álbum aberta: um único vídeo é decodificado e mostrado nos
+  dois lugares, então custa o mesmo que uma capa só.
+- O loop não pisca mais: a capa parada não volta a aparecer quando o
+  vídeo recomeça, nem quando a janela perde o foco.
+- Barras de rolagem finas por cima do conteúdo, no estilo de cada tema:
+  aparecem ao rolar ou ao passar o mouse e engrossam para arrastar. Nas
+  letras, só aparecem quando você mesmo rola.
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.25-1
 - Informações de todos os artistas e álbuns buscadas em segundo plano
   depois de indexar (MusicBrainz e Wikipédia, uma consulta por segundo),

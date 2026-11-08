@@ -157,7 +157,7 @@ Item {
                 contentHeight: body.height + 32
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                ScrollBar.vertical: OverlayScrollBar {}
                 Column {
                     id: body
                     x: 24; width: scroller.width - 48

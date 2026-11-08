@@ -19,6 +19,7 @@ fn main() {
         "qml/ui/PlayerBar.qml",
         "qml/ui/CoverArt.qml",
         "qml/ui/MotionCover.qml",
+        "qml/ui/MotionHub.qml",
         "qml/ui/FastScroll.qml",
         "qml/ui/GroupsPage.qml",
         "qml/ui/PlayerControls.qml",

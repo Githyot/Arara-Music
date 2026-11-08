@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Import playlists and likes from Apple Music / YouTube Music exports.
 // Step 1 explains how to export; step 2 shows what matched and what's missing.
@@ -98,6 +99,7 @@ Popup {
                 color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1; font.weight: Font.Bold
             }
             ListView {
+                QQC.ScrollBar.vertical: OverlayScrollBar {}
                 id: missingList
                 visible: count > 0
                 width: parent.width; height: Math.min(contentHeight, 210)

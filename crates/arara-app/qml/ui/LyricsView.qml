@@ -1,5 +1,6 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Karaoke lyrics. The current line is centered and its words fill with the
 // accent color as they are sung (word timings from enhanced LRC, or
@@ -69,6 +70,7 @@ Item {
     onHeightChanged: Qt.callLater(function () { view.follow(false) })
 
     ListView {
+        QQC.ScrollBar.vertical: OverlayScrollBar { userOnly: true; onDark: true }
         id: lv
         anchors.fill: parent
         visible: view.lyrics.kind === "synced"
@@ -194,6 +196,7 @@ Item {
     // the song (proportionally) so they still roughly follow the music.
     property real duration: 0
     Flickable {
+        QQC.ScrollBar.vertical: OverlayScrollBar { userOnly: true; onDark: true }
         id: plainFlick
         anchors.fill: parent
         visible: view.lyrics.kind === "plain"

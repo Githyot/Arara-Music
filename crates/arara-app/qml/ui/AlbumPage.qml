@@ -1,10 +1,12 @@
 import QtQuick
 import QtQuick.Controls
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Album details: big art + title on the left (stacks on narrow widths),
 // boxed track list on the right.
 Flickable {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: page
     property var album
     property var tracks: []

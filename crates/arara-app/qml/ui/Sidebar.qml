@@ -1,6 +1,7 @@
 import QtQuick
 import AraraStyle
 import QtQuick.Layouts
+import QtQuick.Controls.Basic as QQC
 
 // Navigation sidebar: library, categories, collections, playlists and
 // servers, each in a section that folds away (state is remembered).
@@ -64,6 +65,7 @@ Item {
     }
 
     Flickable {
+        QQC.ScrollBar.vertical: OverlayScrollBar {}
         id: flick
         anchors { left: card.left; right: card.right; top: head.bottom; bottom: foot.top; leftMargin: 6; rightMargin: 6; bottomMargin: 4 }
         contentHeight: col.height + 8

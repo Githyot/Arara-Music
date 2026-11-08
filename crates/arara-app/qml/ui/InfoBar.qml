@@ -1,5 +1,6 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // "Sobre" side bar for an album or an artist: photo, Wikipedia text, facts
 // from MusicBrainz, library stats, top songs and albums they appear on.
@@ -156,6 +157,7 @@ Rectangle {
     }
 
     Flickable {
+        QQC.ScrollBar.vertical: OverlayScrollBar {}
         id: flick
         anchors { left: parent.left; right: parent.right; top: head.bottom; bottom: parent.bottom; leftMargin: 1 }
         clip: !bar.embedded

@@ -1,10 +1,12 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Album grid. GridView only instantiates visible delegates and recycles
 // them, and each cover is decoded at tile size on a worker thread, so memory
 // stays flat no matter how large the library is.
 GridView {
+    QQC.ScrollBar.vertical: OverlayScrollBar {}
     id: grid
     property var albums: []
     signal openAlbum(var album)

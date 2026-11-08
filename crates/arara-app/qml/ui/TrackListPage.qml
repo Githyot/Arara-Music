@@ -1,5 +1,6 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // Generic list page (Favoritas, Recentes, Mais tocadas, a playlist):
 // header with title and actions, then a boxed, virtualized track list.
@@ -26,6 +27,7 @@ Item {
     readonly property int side: Math.max(24, (width - 900) / 2)
 
     ListView {
+        QQC.ScrollBar.vertical: OverlayScrollBar {}
         id: lv
         anchors.fill: parent
         clip: true

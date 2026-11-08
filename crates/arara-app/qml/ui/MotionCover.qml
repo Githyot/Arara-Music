@@ -1,5 +1,4 @@
 import QtQuick
-import QtMultimedia
 import AraraStyle
 
 // Album art that turns into the album's animated cover (a short silent
@@ -7,45 +6,50 @@ import AraraStyle
 // and the album has one. The still cover is always underneath, so nothing
 // changes when there's no video or it can't play.
 //
-// The video player only exists while the cover is on screen, the window isn't
-// minimized and `active` is true: when hidden it is destroyed, which frees
-// the decoder and its memory instead of keeping a paused one around.
+// The video itself is decoded by MotionHub (in Main), shared by every cover
+// of the same album and only while one is on screen; this item just draws the
+// current frame with rounded corners.
 Item {
     id: root
     property string source: ""         // still cover
     property int decode: Math.max(width, height)
     property int albumId: -1
     property bool active: true         // the caller can pause it (e.g. panel hidden)
-    // The album page's cover is "primary": while it plays an album, the panel
-    // shows that album still, so the same video is never decoded twice.
-    property bool primary: false
+    property bool primary: false       // kept for callers; sharing makes it unnecessary
     property alias hovered: still.hovered
     property string motion: ""         // file:// URL of the cached video
     // Videos that failed to play this session (no H.264 decoder…): stay still.
     property bool broken: false
-    readonly property bool playing: loader.item !== null && loader.item.shown
+    readonly property bool playing: clip !== null && clip.shown
 
     readonly property var win: Window.window
-    // Only while the window is on screen and focused: a player usually sits
-    // behind other windows, and then the video costs nothing.
-    readonly property bool onScreen: visible && width > 0 && win !== null && win.active
+    readonly property bool onScreen: visible && width > 0 && win !== null
         && win.visibility !== Window.Minimized && win.visibility !== Window.Hidden
     readonly property bool wanted: Prefs.motionCovers && !Theme.reduceMotion && motion !== "" && !broken && active && onScreen
-        && (primary || Prefs.motionPrimaryAlbum !== albumId)
-    onWantedChanged: claim()
-    onAlbumIdChanged: { refresh(); claim() }
-    function claim() {
-        if (!primary) return
-        if (wanted) Prefs.motionPrimaryAlbum = albumId
-        else if (Prefs.motionPrimaryAlbum === albumId) Prefs.motionPrimaryAlbum = -1
+        && Prefs.motionHub !== null
+
+    // The shared clip this cover shows, and the URL it holds in the hub.
+    property Item clip: null
+    property string held: ""
+    function sync() {
+        var want = wanted ? motion : ""
+        if (want === held) return
+        if (held !== "" && Prefs.motionHub) Prefs.motionHub.release(held)
+        held = want
+        clip = want !== "" ? Prefs.motionHub.acquire(want) : null
     }
-    Component.onDestruction: if (primary && Prefs.motionPrimaryAlbum === albumId) Prefs.motionPrimaryAlbum = -1
+    onWantedChanged: sync()
+    onMotionChanged: sync()
+    readonly property bool clipBroken: clip !== null && clip.broken
+    onClipBrokenChanged: if (clipBroken) broken = true
+    onAlbumIdChanged: refresh()
+    Component.onDestruction: if (held !== "" && Prefs.motionHub) Prefs.motionHub.release(held)
 
     function refresh() {
         broken = false
         motion = Prefs.motionCovers && albumId >= 0 ? library.motionCover(albumId) : ""
     }
-    Component.onCompleted: refresh()
+    Component.onCompleted: { refresh(); sync() }
     Connections {
         target: Prefs
         function onMotionCoversChanged() { root.refresh() }
@@ -64,32 +68,13 @@ Item {
     }
 
     Loader {
-        id: loader
         anchors.fill: parent
-        active: root.wanted
+        active: root.clip !== null
         sourceComponent: Item {
-            id: clip
-            // Shown once the first frame is out, so the still cover never blinks.
-            property bool shown: player.playbackState === MediaPlayer.PlayingState && player.position > 0
-            MediaPlayer {
-                id: player
-                source: root.motion
-                loops: MediaPlayer.Infinite
-                videoOutput: video
-                onErrorOccurred: (error, message) => { console.warn("motion cover:", message); root.broken = true }
-                onSourceChanged: play()
-                Component.onCompleted: play()
-            }
-            VideoOutput {
-                id: video
-                anchors.fill: parent
-                fillMode: VideoOutput.PreserveAspectCrop
-                visible: false
-            }
             ShaderEffectSource {
                 id: frame
                 anchors.fill: parent
-                sourceItem: video
+                sourceItem: root.clip ? root.clip.video : null
                 hideSource: true
                 live: true
                 visible: false
@@ -101,7 +86,7 @@ Item {
                 property size size: Qt.size(width, height)
                 property real radius: still.radius
                 fragmentShader: "qrc:/qt/qml/AraraStyle/rounded.frag.qsb"
-                opacity: clip.shown ? 1 : 0
+                opacity: root.playing ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 400 } }
             }
             Rectangle { anchors.fill: parent; radius: still.radius; color: "white"; opacity: still.hovered ? 0.08 : 0 }

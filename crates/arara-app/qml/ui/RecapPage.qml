@@ -1,5 +1,6 @@
 import QtQuick
 import AraraStyle
+import QtQuick.Controls.Basic as QQC
 
 // "Retrospectiva": how much you listened, to whom and when, for a week, a
 // month, a year or all time, like Spotify Wrapped, Apple Music Replay and
@@ -136,6 +137,7 @@ Item {
 
     // ======================================================================
     Flickable {
+        QQC.ScrollBar.vertical: OverlayScrollBar {}
         id: flick
         anchors.fill: parent
         contentHeight: col.height + 48
