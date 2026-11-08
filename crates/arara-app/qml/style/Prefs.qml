@@ -11,6 +11,10 @@ QtObject {
     property bool lyricsInPanel: true
     // Player
     property bool remainingTime: true  // "-1:23" instead of the total length
+    // Animated album covers (album page and panel)
+    property bool motionCovers: false
+    property int motionPrimaryAlbum: -1   // album whose video the album page is playing
+    signal motionCleared()                // the cache was emptied: covers ask again
     // Explicit "E" badge
     property bool showExplicit: true
     property bool explicitLyrics: true // also when only the lyrics look explicit

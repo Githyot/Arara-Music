@@ -17,6 +17,29 @@ Item {
     signal clearHistory()
     function set(k, v) { if (setFn) setFn(k, v) }
     function get(k) { return prefs[k] }
+    // Animated cover cache and the "download all" progress.
+    property int motionFiles: 0
+    property real motionBytes: 0
+    property int motionDone: 0
+    property int motionTotal: 0
+    property int motionFound: 0
+    property string motionResult: ""
+    property bool motionBulk: false     // "Baixar agora" running (not a single album page)
+    function refreshMotion() {
+        try { var m = JSON.parse(library.motionCacheJson()); motionFiles = m.files; motionBytes = m.bytes } catch (e) {}
+    }
+    Connections {
+        target: library
+        function onMotionProgress(done, total, found) {
+            if (!dlg.motionBulk) { if (dlg.visible) dlg.refreshMotion(); return }
+            if (done >= total) dlg.motionBulk = false
+            dlg.motionDone = done; dlg.motionTotal = done >= total ? 0 : total; dlg.motionFound = found
+            if (total > 0 && done >= total && !dlg.motionBulk)
+                dlg.motionResult = "Pronto: " + found + " de " + total + (total === 1 ? " álbum procurado tem" : " álbuns procurados têm") + " capa animada"
+            if (dlg.visible) dlg.refreshMotion()
+        }
+    }
+    onVisibleChanged: if (visible) refreshMotion()
     function open() { visible = true; card.forceActiveFocus() }
     function close() { visible = false }
 
@@ -422,6 +445,37 @@ Item {
                             subtitle: "Créditos, biografia e foto dos artistas e dados dos álbuns no MusicBrainz e na Wikipédia. Só o nome da música, do álbum ou do artista é enviado"
                             checked: dlg.get("onlineinfo")
                             onToggled: dlg.set("onlineinfo", !checked)
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "library"
+                        title: "Capas animadas"
+                        SwitchRow {
+                            title: "Baixar capas animadas"
+                            subtitle: dlg.get("onlineinfo")
+                                ? "Quando o álbum tem uma capa animada no Apple Music, ela toca sem som na página do álbum e no painel. Cada uma é baixada uma vez (cerca de 2 MB) e fica guardada. Usa o serviço não oficial artwork.m8tec.top, que recebe só o nome do álbum e do artista"
+                                : "Ligue “Buscar informações online” para usar"
+                            enabled: dlg.get("onlineinfo")
+                            opacity: enabled ? 1 : 0.5
+                            checked: dlg.get("motioncovers")
+                            onToggled: { dlg.set("motioncovers", !checked); dlg.refreshMotion() }
+                        }
+                        ButtonRow {
+                            visible: dlg.get("motioncovers") && dlg.get("onlineinfo")
+                            title: "Todos os álbuns"
+                            subtitle: dlg.motionTotal > 0
+                                ? "Procurando… " + dlg.motionDone + " de " + dlg.motionTotal + " álbuns, " + dlg.motionFound + " com capa animada"
+                                : dlg.motionResult || "Sem isso, a capa animada é procurada quando você abre o álbum ou toca uma música dele"
+                            button: "Baixar agora"
+                            onClicked: { dlg.motionBulk = true; dlg.motionResult = "Todos os álbuns já foram procurados"; library.downloadAllMotionCovers() }
+                        }
+                        ButtonRow {
+                            visible: dlg.motionFiles > 0
+                            title: "Capas animadas guardadas"
+                            subtitle: dlg.motionFiles + (dlg.motionFiles === 1 ? " capa, " : " capas, ") + (dlg.motionBytes / 1048576).toFixed(1).replace(".", ",") + " MB no disco"
+                            button: "Apagar"
+                            destructive: true
+                            onClicked: { library.clearMotionCovers(); dlg.motionResult = ""; dlg.refreshMotion(); Prefs.motionCleared() }
                         }
                     }
                     Group {

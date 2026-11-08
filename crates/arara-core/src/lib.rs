@@ -9,6 +9,7 @@ pub mod edit;
 pub mod import;
 pub mod info;
 pub mod lyrics;
+pub mod motion;
 pub mod natural;
 pub mod query;
 pub mod remote;

@@ -34,7 +34,7 @@ Window {
         tilesize: "medium", fontscale: 1.0, compact: false, reducemotion: false,
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
         autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
-        explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true, listening: true,
+        explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true, listening: true, motioncovers: false,
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
@@ -138,6 +138,7 @@ Window {
     Binding { target: Prefs; property: "lyricsInPanel"; value: win.prefs.lyricspanel }
     Binding { target: Prefs; property: "remainingTime"; value: win.prefs.remaining }
     Binding { target: Prefs; property: "showExplicit"; value: win.prefs.explicit }
+    Binding { target: Prefs; property: "motionCovers"; value: win.prefs.motioncovers && win.prefs.onlineinfo }
     Binding { target: Prefs; property: "explicitLyrics"; value: win.prefs.explicitlyrics }
     Binding { target: Prefs; property: "playbackRate"; value: Prefs.clampRate(Number(win.prefs.rate) || 1) }
     Connections {
