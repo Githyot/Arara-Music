@@ -36,6 +36,10 @@ Rectangle {
     signal openLyrics()
     signal close()
     signal starToggled(var track, bool starred)
+    // Favourite excerpt (marked on the lyrics screen): a button plays it.
+    property var excerpt: null
+    property bool excerptPlaying: false
+    signal playExcerpt()
     signal menuRequested(var track, real x, real y)
     signal goArtist(var track)
     signal goAlbum(var track)
@@ -223,6 +227,13 @@ Rectangle {
                 FlatButton {
                     icon: panel.track && panel.track.starred ? "star" : "unstar"; circular: true; iconColor: "white"
                     onClicked: { var s = !panel.track.starred; panel.track.starred = s; panel.starToggled(panel.track, s); panel.trackChanged() }
+                }
+                FlatButton {
+                    visible: panel.excerpt !== null
+                    icon: panel.excerptPlaying ? "pause" : "excerpt"; circular: true; iconColor: "white"
+                    tip: panel.excerptPlaying ? "Parar o trecho preferido" : "Tocar o trecho preferido"
+                    color: panel.excerptPlaying ? Qt.rgba(1, 1, 1, hovered ? 0.4 : 0.3) : hovered ? Qt.rgba(1, 1, 1, 0.2) : "transparent"
+                    onClicked: panel.playExcerpt()
                 }
                 FlatButton { icon: "lyrics"; circular: true; iconColor: "white"; tip: "Letra"; onClicked: panel.openLyrics() }
                 FlatButton { icon: "queue"; circular: true; iconColor: "white"; tip: "Fila"; onClicked: panel.tab = "queue" }

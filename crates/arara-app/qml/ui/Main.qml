@@ -70,6 +70,35 @@ Window {
     readonly property bool coverAccent: prefs.accent === "cover"
     readonly property bool autoLyrics: prefs.autolyrics
     property var lyrics: ({ kind: "none" })
+    // ---------- favourite excerpt ----------
+    // One per song, marked on the lyrics screen; stored as "pref:excerpt:<id>"
+    // = {"s": ms, "e": ms}. `excerptRev` re-reads it after a change.
+    property int excerptRev: 0
+    readonly property var excerpt: {
+        excerptRev
+        var t = player.current
+        if (!t || t.id === undefined || t.free) return null
+        try {
+            var x = JSON.parse(library.setting("excerpt:" + t.id, "null"))
+            return x && x.e > x.s ? x : null
+        } catch (err) { return null }
+    }
+    function setExcerpt(t, s, e) {
+        if (!t) return
+        if (e > s) {
+            library.setSetting("excerpt:" + t.id, JSON.stringify({ s: s, e: e }))
+            toast.show("Trecho preferido salvo: " + fmtMs(s) + " – " + fmtMs(e))
+        } else {
+            library.setSetting("excerpt:" + t.id, "null")
+            excerptPlay.stop(false)
+            toast.show("Trecho preferido removido")
+        }
+        excerptRev++
+    }
+    function fmtMs(ms) {
+        var t = Math.max(0, Math.round(ms / 1000))
+        return Math.floor(t / 60) + ":" + ("0" + (t % 60)).slice(-2)
+    }
     property bool loadingLyrics: false
     // Blurred cover + sampled colours of the current track, for backgrounds.
     property string backdrop: ""
@@ -1223,6 +1252,11 @@ Window {
                     onGoAlbum: (t) => win.goToAlbumOf(t)
                     onEditLyrics: lyricsEditor.openWith(player.current, win.lyrics)
                     onStarToggled: (t, s) => win.onStar(t, s)
+                    excerpt: win.excerpt
+                    excerptPlaying: excerptPlay.active
+                    onExcerptSet: (t, s, e) => win.setExcerpt(t, s, e)
+                    onExcerptCleared: (t) => win.setExcerpt(t, -1, -1)
+                    onPlayExcerpt: excerptPlay.toggle()
                     onAddToPlaylist: (t, x, y) => { if (t && !t.free) trackMenu.openPlaylistsAt(t, x, y, sidebar.playlists) }
                     onRefetchLyrics: { if (!player.current) return; win.lyrics = { kind: "none" }; win.loadingLyrics = true; library.refetchLyrics(player.current.id) }
                 }
@@ -1269,6 +1303,9 @@ Window {
             onOpenLyrics: win.lyricsMode = true
             onClose: { win.panelOpen = false; library.setSetting("panel", "0") }
             onStarToggled: (t, s) => win.onStar(t, s)
+            excerpt: win.excerpt
+            excerptPlaying: excerptPlay.active
+            onPlayExcerpt: excerptPlay.toggle()
             onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
             onGoArtist: (t) => win.goToArtistOf(t)
             onGoAlbum: (t) => win.goToAlbumOf(t)
@@ -1436,6 +1473,47 @@ Window {
             if (player.current && player.current.id === trackId) win.refreshCoverLook()
         }
     }
+    // Plays the favourite excerpt of the current song: jumps to its start and
+    // pauses (with the usual short fade) at its end. Changing song, or seeking
+    // away from the excerpt, ends it.
+    QtObject {
+        id: excerptPlay
+        property bool active: false
+        property int trackId: -1
+        property real end: 0
+        property real start: 0
+        property real last: 0
+        property double since: 0
+        function toggle() {
+            if (active) { stop(true); return }
+            var x = win.excerpt
+            if (!x || !player.current) return
+            trackId = player.current.id; start = x.s; end = x.e; last = x.s; since = Date.now()
+            active = true
+            player.seekTo(x.s)
+            if (media.playbackState !== MediaPlayer.PlayingState) player.resume()
+        }
+        function stop(pause) {
+            if (!active) return
+            active = false
+            if (pause && media.playbackState === MediaPlayer.PlayingState) player.pause()
+        }
+        function check(pos) {
+            if (!active) return
+            if (!player.current || player.current.id !== trackId) { active = false; return }
+            // Right after the jump the backend may still report the old position.
+            if (Date.now() - since < 800) { if (pos >= start - 200 && pos < end) last = pos; return }
+            // A jump by hand (not the playback moving on) cancels it.
+            if (pos < start - 1500 || pos - last > 2500) { active = false; return }
+            last = pos
+            if (pos >= end - 150) stop(true)
+        }
+    }
+    Connections {
+        target: media
+        function onPositionChanged() { excerptPlay.check(media.position) }
+    }
+
     Timer { id: volumeSave; interval: 600; onTriggered: library.setSetting("volume", String(win.userVolume)) }
     ImportDialog {
         id: importDialog
@@ -1450,7 +1528,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.27",
+        onAbout: prompt.info("Arara Music 0.7.28",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     // Decodes the animated covers once for every place that shows them.

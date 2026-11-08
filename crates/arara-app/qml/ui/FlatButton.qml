@@ -16,6 +16,8 @@ Rectangle {
     property real corner: -1        // explicit corner radius (e.g. Material's rounded-square FAB)
     // Override for the icon tint (e.g. white on the lyrics screen); undefined = automatic.
     property var iconColor: undefined
+    // Same for the label of text buttons (white on the lyrics screen).
+    property var textColor: undefined
     readonly property bool hovered: ma.containsMouse
     // Tooltip for icon-only buttons (GNOME shows one on every icon button).
     // Defaults from the icon name; set tip: "" to hide or a text to override.
@@ -51,7 +53,7 @@ Rectangle {
         anchors.centerIn: parent
         visible: root.text !== ""
         text: root.text
-        color: root.suggested ? Theme.accentInk : root.destructive ? "white" : Theme.fg
+        color: root.textColor !== undefined ? root.textColor : root.suggested ? Theme.accentInk : root.destructive ? "white" : Theme.fg
         font.family: Theme.font
         font.pointSize: root.text !== "" ? Theme.fontSize : Math.round(root.size * 0.36)
         font.weight: root.text !== "" ? Font.DemiBold : Font.Normal

@@ -41,6 +41,25 @@ Item {
     property bool showAddButton: true
     property bool compact: false
     signal seek(real ms)
+    // Favourite excerpt: lines from markFrom up to markTo (ms) get a bar on the
+    // side. While `picking`, a click on a line picks it instead of seeking.
+    property real markFrom: -1
+    property real markTo: -1
+    property bool picking: false
+    signal picked(real t, real e)
+    // While picking the lines hold still, so they don't slide away under the pointer.
+    onPickingChanged: {
+        browseTimer.stop()
+        browsing = false
+        follow(false)
+        browsing = picking
+    }
+    // Where a line ends: its own end time, or the start of the next line.
+    function lineEnd(i) {
+        var l = lines[i]
+        if (l.e && l.e > l.t) return l.e
+        return i + 1 < lines.length ? lines[i + 1].t : l.t + 4000
+    }
 
     readonly property var lines: lyrics.kind === "synced" ? lyrics.lines : []
     readonly property int current: {
@@ -57,9 +76,10 @@ Item {
     Timer { id: browseTimer; interval: 3000; onTriggered: { view.browsing = false; view.follow(true) } }
     signal stepped(real delta, int from)
     function follow(animated) {
-        if (current < 0 || lv.count === 0 || browsing) return
+        if (lv.count === 0 || browsing) return
         var old = lv.contentY
-        lv.positionViewAtIndex(current, ListView.Beginning)
+        // Before the first line is sung, keep the start of the lyrics in view.
+        lv.positionViewAtIndex(Math.max(0, current), ListView.Beginning)
         var dest = Math.max(lv.originY - lv.topMargin, lv.contentY - lv.height * 0.28)
         lv.contentY = dest
         var delta = dest - old
@@ -89,7 +109,7 @@ Item {
             fragmentShader: "qrc:/qt/qml/AraraStyle/fade.frag.qsb"
         }
         onMovementStarted: { view.browsing = true; browseTimer.stop() }
-        onMovementEnded: browseTimer.restart()
+        onMovementEnded: if (!view.picking) browseTimer.restart()
 
         delegate: Item {
             id: lineItem
@@ -184,7 +204,34 @@ Item {
                     }
                 }
             }
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { view.browsing = false; view.seek(lineItem.modelData.t) } }
+            readonly property bool marked: view.markFrom >= 0 && modelData.t >= view.markFrom - 50
+                && (view.markTo < 0 ? modelData.t <= view.markFrom + 50 : modelData.t < view.markTo - 50)
+            // Picking: the line under the pointer gets a soft pill.
+            Rectangle {
+                visible: view.picking && lineMa.containsMouse
+                x: flow.x - 12; y: -6
+                width: flow.width * flow.scale + 24; height: flow.height * flow.scale + 12
+                radius: 10
+                color: view.onDark ? Qt.rgba(1, 1, 1, 0.14) : Theme.hover
+            }
+            Rectangle {
+                visible: lineItem.marked
+                x: lineItem.onRight ? lineItem.width - 12 : 8
+                y: 2; width: 4; radius: 2
+                height: Math.max(8, flow.height * flow.scale - 4)
+                color: view.onDark ? "white" : Theme.accent
+                opacity: lineItem.active ? 0.95 : 0.6
+            }
+            MouseArea {
+                id: lineMa
+                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                hoverEnabled: view.picking
+                onClicked: {
+                    if (!view.picking) view.browsing = false
+                    if (view.picking) view.picked(lineItem.modelData.t, view.lineEnd(lineItem.index))
+                    else view.seek(lineItem.modelData.t)
+                }
+            }
         }
     }
     readonly property bool hasDuet: {

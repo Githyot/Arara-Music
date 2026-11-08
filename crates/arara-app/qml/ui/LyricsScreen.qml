@@ -31,6 +31,37 @@ Item {
     signal refetchLyrics()
     signal starToggled(var track, bool starred)
     signal addToPlaylist(var track, real x, real y)
+    // Favourite excerpt of this song ({ s, e } in ms, or null) and whether it
+    // is playing right now.
+    property var excerpt: null
+    property bool excerptPlaying: false
+    signal excerptSet(var track, real s, real e)
+    signal excerptCleared(var track)
+    signal playExcerpt()
+
+    // Marking a new excerpt: "" (off), "start", then "end". A line of the
+    // lyrics, or the current position, gives each point.
+    property string marking: ""
+    property real pendingS: -1
+    property real pendingSEnd: -1
+    onTrackChanged: marking = ""
+    function startMarking() { pendingS = -1; pendingSEnd = -1; marking = "start" }
+    // t: where the picked point starts; e: where its line ends (same as t for
+    // the current position).
+    function pick(t, e) {
+        if (marking === "start") { pendingS = t; pendingSEnd = e; marking = "end"; return }
+        if (marking !== "end") return
+        var s = pendingS, end = e
+        // Picked a line before the start: it becomes the start instead.
+        if (t < pendingS) { s = t; end = Math.max(pendingSEnd, e) }
+        if (end - s < 1000) end = s + 1000
+        marking = ""
+        ls.excerptSet(ls.track, Math.round(s), Math.round(end))
+    }
+    function fmt(ms) {
+        var t = Math.max(0, Math.round(ms / 1000))
+        return Math.floor(t / 60) + ":" + ("0" + (t % 60)).slice(-2)
+    }
 
     readonly property bool wide: width > 760
     // On very wide windows keep cover + lyrics together in the middle.
@@ -146,6 +177,14 @@ Item {
                     color: hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(1, 1, 1, 0.1)
                     onClicked: { var s = !ls.track.starred; ls.track.starred = s; ls.starToggled(ls.track, s); ls.trackChanged() }
                 }
+                // Plays the favourite excerpt (shown once one is marked).
+                FlatButton {
+                    visible: ls.excerpt !== null
+                    icon: ls.excerptPlaying ? "pause" : "excerpt"; circular: true; iconColor: "white"
+                    tip: ls.excerpt ? (ls.excerptPlaying ? "Parar o trecho preferido" : "Tocar o trecho preferido (" + ls.fmt(ls.excerpt.s) + " – " + ls.fmt(ls.excerpt.e) + ")") : ""
+                    color: ls.excerptPlaying ? Qt.rgba(1, 1, 1, hovered ? 0.4 : 0.32) : hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(1, 1, 1, 0.1)
+                    onClicked: ls.playExcerpt()
+                }
                 FlatButton {
                     id: plBtn
                     icon: "playlist"; circular: true; iconColor: "white"
@@ -172,12 +211,83 @@ Item {
         playing: ls.playing
         onSeek: (ms) => ls.seek(ms)
         onAddLyrics: ls.editLyrics()
+        picking: ls.marking !== ""
+        markFrom: ls.marking === "end" ? ls.pendingS : ls.marking === "" && ls.excerpt ? ls.excerpt.s : -1
+        markTo: ls.marking === "" && ls.excerpt ? ls.excerpt.e : -1
+        onPicked: (t, e) => ls.pick(t, e)
+    }
+
+    // Marking bar: what to do next, over the top of the lyrics.
+    Rectangle {
+        id: markBar
+        visible: ls.marking !== ""
+        z: 2
+        readonly property real areaX: ls.wide ? ls.pad + left.width : 0
+        readonly property real areaW: ls.wide ? ls.stage - left.width - 24 : ls.width
+        x: areaX + Math.max(12, (areaW - width) / 2)
+        y: ls.wide ? 60 : left.height + 8
+        width: Math.min(areaW - 24, markCol.implicitWidth + 32)
+        height: markCol.implicitHeight + 24
+        radius: 14
+        color: Qt.rgba(0, 0, 0, 0.55)
+        border.color: Qt.rgba(1, 1, 1, 0.18)
+        Column {
+            id: markCol
+            anchors.centerIn: parent
+            width: parent.width - 32
+            spacing: 10
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                color: "white"; font.family: Theme.font; font.pointSize: Theme.fontSize + 1; font.weight: Font.DemiBold
+                text: ls.marking === "start"
+                    ? (ls.lyrics.kind === "synced" ? "Toque na linha onde o trecho preferido começa" : "Toque em “Começa aqui” quando o trecho preferido começar")
+                    : (ls.lyrics.kind === "synced" ? "Agora toque na linha onde ele termina" : "Agora toque em “Termina aqui” quando ele acabar")
+            }
+            Text {
+                width: parent.width
+                visible: ls.marking === "end"
+                horizontalAlignment: Text.AlignHCenter
+                color: Qt.rgba(1, 1, 1, 0.75); font.family: Theme.font; font.pointSize: Theme.fontSize
+                text: "Começa em " + ls.fmt(ls.pendingS)
+            }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 8
+                FlatButton {
+                    text: (ls.marking === "start" ? "Começa aqui" : "Termina aqui") + " (" + ls.fmt(ls.position) + ")"
+                    textColor: "white"
+                    color: hovered ? Qt.rgba(1, 1, 1, 0.28) : Qt.rgba(1, 1, 1, 0.16)
+                    onClicked: ls.pick(ls.position, ls.position)
+                }
+                FlatButton {
+                    visible: ls.excerpt !== null && ls.marking === "start"
+                    text: "Remover trecho"; textColor: "white"
+                    color: hovered ? Qt.rgba(1, 1, 1, 0.18) : "transparent"
+                    onClicked: { ls.marking = ""; ls.excerptCleared(ls.track) }
+                }
+                FlatButton {
+                    text: "Cancelar"; textColor: "white"
+                    color: hovered ? Qt.rgba(1, 1, 1, 0.18) : "transparent"
+                    onClicked: ls.marking = ""
+                }
+            }
+        }
     }
 
     Row {
         anchors { right: parent.right; top: parent.top; margins: 12 }
         spacing: 6
         FlatButton { icon: "refresh"; circular: true; iconColor: "white"; visible: ls.track !== null && !ls.loadingLyrics; onClicked: ls.refetchLyrics() }
+        FlatButton {
+            icon: "excerpt-mark"; circular: true; iconColor: "white"
+            tip: ls.excerpt ? "Marcar o trecho preferido de novo" : "Marcar o trecho preferido"
+            visible: ls.track !== null && !ls.track.free
+            checked: ls.marking !== ""
+            color: checked ? Qt.rgba(1, 1, 1, 0.3) : hovered ? Qt.rgba(1, 1, 1, 0.2) : "transparent"
+            onClicked: ls.marking !== "" ? ls.marking = "" : ls.startMarking()
+        }
         FlatButton { icon: "edit"; tip: "Editar a letra"; circular: true; iconColor: "white"; visible: ls.track !== null; onClicked: ls.editLyrics() }
         FlatButton { icon: "pan-down"; circular: true; iconColor: "white"; onClicked: ls.close() }
     }
