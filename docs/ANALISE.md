@@ -129,11 +129,11 @@ Servidor remoto simulado (`tools/mock_server.py`, API do Jellyfin) com 17.884 fa
 
 ## Feito na versão 0.6
 
-**Música livre.** Uma página nova busca no Jamendo e no Internet Archive ao mesmo tempo. Do Internet Archive só entram itens com licença Creative Commons ou em domínio público, conferida na busca e de novo nos metadados de cada item. O Jamendo precisa de uma chave grátis ("client id"), que o usuário cola na própria página. Cada resultado mostra a fonte e a licença, toca na hora e pode ser baixado. O download respeita quando o artista não permite baixar no Jamendo.
+**Música livre** (removida na 0.7.14 a pedido; as músicas baixadas continuam na biblioteca como arquivos locais). Uma página nova busca no Jamendo e no Internet Archive ao mesmo tempo. Do Internet Archive só entram itens com licença Creative Commons ou em domínio público, conferida na busca e de novo nos metadados de cada item. O Jamendo precisa de uma chave grátis ("client id"), que o usuário cola na própria página. Cada resultado mostra a fonte e a licença, toca na hora e pode ser baixado. O download respeita quando o artista não permite baixar no Jamendo.
 
 **Fila de downloads** (`arara-core/src/downloads.rs`): dois workers leem de um canal; se o arquivo já existe, o pedido termina sem baixar; a gravação vai para `.part` e só é renomeada no fim (a pasta vigiada nunca vê arquivo pela metade); depois o arquivo recebe título, artista, álbum e a licença no comentário, e a letra do LRCLIB é salva como `.lrc` ao lado. A interface recebe início, progresso, fim e falha por sinais do Qt, com um anel de progresso que cancela ao clicar. Os arquivos vão para `<pasta de músicas>/Música livre/Artista/Álbum/`.
 
-Testado com um servidor simulado (`tools/mock_freemusic.py`), porque a rede desta máquina bloqueia os dois sites.
+Foi testado com um servidor simulado (removido junto), porque a rede desta máquina bloqueia os dois sites.
 
 ## Feito na versão 0.7
 
@@ -155,7 +155,7 @@ Testado com um servidor simulado (`tools/mock_freemusic.py`), porque a rede dest
   capa ou cor), fundo do player, tamanho das capas e do texto, modo compacto,
   reduzir animações, ReplayGain por faixa/álbum com pré-amplificação, retomar
   sessão, tempo restante/duração, letras (busca, painel, duetos, tamanho,
-  ajuste de sincronia), downloads simultâneos, chave do Jamendo, botões da janela.
+  ajuste de sincronia), botões da janela.
 
 ## Próximos passos
 

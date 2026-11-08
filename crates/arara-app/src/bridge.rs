@@ -453,30 +453,6 @@ pub mod qobject {
         #[cxx_name = "analysisReady"]
         fn analysis_ready(self: Pin<&mut Library>, track_id: i64, json: QString);
 
-        /// Search Jamendo + Internet Archive (open licences only); answers with `freeResults`.
-        #[qinvokable]
-        #[cxx_name = "searchFree"]
-        fn search_free(self: Pin<&mut Library>, query: &QString);
-
-        /// `json`: array of tracks; `errors`: array of strings (a source that failed).
-        #[qsignal]
-        #[cxx_name = "freeResults"]
-        fn free_results(self: Pin<&mut Library>, query: QString, json: QString, errors: QString);
-
-        /// Download a free track (FreeTrack JSON) into the library, with its .lrc.
-        #[qinvokable]
-        #[cxx_name = "downloadFree"]
-        fn download_free(self: Pin<&mut Library>, track_json: &QString) -> bool;
-
-        #[qinvokable]
-        #[cxx_name = "cancelDownload"]
-        fn cancel_download(self: &Library, id: &QString);
-
-        /// kind: started | progress | done | here | failed | cancelled. `pct` -1 = unknown size.
-        #[qsignal]
-        #[cxx_name = "downloadEvent"]
-        fn download_event(self: Pin<&mut Library>, id: QString, kind: QString, pct: i32, message: QString);
-
         /// play, pause, playpause, stop, next, previous, seek (arg = µs offset),
         /// setposition (arg = µs), raise, quit
         #[qsignal]
@@ -488,7 +464,7 @@ pub mod qobject {
 }
 
 use crate::desktop::{self, Command, Mpris, TrackMeta};
-use arara_core::{covers::CoverCache, db::Db, downloads, freemusic, import, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
+use arara_core::{covers::CoverCache, db::Db, import, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
 use core::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
@@ -516,7 +492,6 @@ pub struct LibraryRust {
     watch_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     mpris: Option<Mpris>,
     inhibit: Option<desktop::Inhibitor>,
-    downloads: Option<downloads::DownloadManager>,
 }
 
 impl Default for LibraryRust {
@@ -549,7 +524,6 @@ impl Default for LibraryRust {
             missing_dirs: QString::from("[]"),
             mpris: None,
             inhibit: None,
-            downloads: None,
         }
     }
 }
@@ -1979,74 +1953,6 @@ impl qobject::Library {
 
 // ---------- background lyrics download ----------
 impl qobject::Library {
-    pub fn search_free(self: Pin<&mut Self>, query: &QString) {
-        let q = query.to_string();
-        let key = self.db.as_ref().and_then(|d| d.get_kv("pref:jamendo").ok().flatten()).or_else(|| std::env::var("ARARA_JAMENDO_CLIENT_ID").ok());
-        let qt = self.qt_thread();
-        std::thread::spawn(move || {
-            let (tracks, errors) = freemusic::FreeMusic::default().search(&q, key.as_deref());
-            let json = serde_json::to_string(&tracks).unwrap_or_else(|_| "[]".into());
-            let errs = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".into());
-            let _ = qt.queue(move |o| o.free_results(qs(&q), qs(&json), qs(&errs)));
-        });
-    }
-
-    pub fn download_free(mut self: Pin<&mut Self>, track_json: &QString) -> bool {
-        let Ok(t) = serde_json::from_str::<serde_json::Value>(&track_json.to_string()) else { return false };
-        let g = |k: &str| t[k].as_str().unwrap_or("").to_string();
-        if g("download_url").is_empty() {
-            return false;
-        }
-        if self.downloads.is_none() {
-            let qt = self.qt_thread();
-            let workers = self.db.as_ref()
-                .and_then(|d| d.get_kv("pref:dlworkers").ok().flatten())
-                .and_then(|v| v.parse::<f64>().ok())
-                .map(|n| n.clamp(1.0, 4.0) as usize)
-                .unwrap_or(2);
-            let mgr = downloads::DownloadManager::new(workers, move |ev| {
-                use downloads::DownloadEvent as E;
-                let (id, kind, pct, msg) = match ev {
-                    E::Started { id } => (id, "started", 0, String::new()),
-                    E::Progress { id, done, total } => (id, "progress", if total > 0 { (done * 100 / total) as i32 } else { -1 }, String::new()),
-                    E::AlreadyHere { id, path } => (id, "here", 100, path.display().to_string()),
-                    E::Finished { id, path, lyrics } => (id, "done", 100, format!("{}{}", path.display(), if lyrics { "|lrc" } else { "" })),
-                    E::Failed { id, error } => (id, "failed", 0, error),
-                    E::Cancelled { id } => (id, "cancelled", 0, String::new()),
-                };
-                let finished = kind == "done";
-                let _ = qt.queue(move |mut o| {
-                    o.as_mut().download_event(qs(&id), qs(kind), pct, qs(&msg));
-                    // the new file is in a watched folder; index it now so it shows up at once
-                    if finished {
-                        o.as_mut().rescan();
-                    }
-                });
-            });
-            self.as_mut().rust_mut().downloads = Some(mgr);
-        }
-        let root = PathBuf::from(self.library_dir.to_string()).join("Música livre");
-        let dest = downloads::library_path(&root, &g("artist"), &g("album"), &g("title"), &g("ext"));
-        let task = downloads::DownloadTask {
-            id: g("id"),
-            url: g("download_url"),
-            dest,
-            artist: g("artist"),
-            title: g("title"),
-            album: g("album"),
-            duration_s: t["duration_ms"].as_u64().unwrap_or(0) / 1000,
-            lyrics: std::env::var("ARARA_OFFLINE").is_err(),
-            comment: format!("{} · {} · {}", g("license"), g("source"), g("page_url")),
-        };
-        self.downloads.as_ref().map(|m| m.enqueue(task)).unwrap_or(false)
-    }
-
-    pub fn cancel_download(&self, id: &QString) {
-        if let Some(m) = &self.downloads {
-            m.cancel(&id.to_string());
-        }
-    }
-
     /// After indexing: look up lyrics (sidecar, tags, LRCLIB) for every track that has none yet,
     /// most-played first, two requests at a time. One run at a time; stops when offline.
     pub fn prefetch_lyrics(mut self: Pin<&mut Self>) {

@@ -3,9 +3,7 @@
 
 pub mod analysis;
 pub mod covers;
-pub mod downloads;
 pub mod explicit;
-pub mod freemusic;
 pub mod db;
 pub mod edit;
 pub mod import;

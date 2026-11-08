@@ -454,7 +454,7 @@ Item {
                             model: [
                                 { k: "genre", t: "Gêneros" }, { k: "year", t: "Anos" }, { k: "composer", t: "Compositores" },
                                 { k: "folder", t: "Pastas" }, { k: "added", t: "Adicionadas recentemente" }, { k: "recent", t: "Tocadas recentemente" },
-                                { k: "mostplayed", t: "Mais tocadas" }, { k: "recap", t: "Retrospectiva" }, { k: "free", t: "Música livre" }, { k: "servers", t: "Servidores" }
+                                { k: "mostplayed", t: "Mais tocadas" }, { k: "recap", t: "Retrospectiva" }, { k: "servers", t: "Servidores" }
                             ]
                             SwitchRow {
                                 required property var modelData
@@ -487,25 +487,6 @@ Item {
                             onClicked: dlg.clearHistory()
                         }
                     }
-                    Group {
-                        visible: dlg.page === "library"
-                        title: "Música livre"
-                        SliderRow {
-                            title: "Downloads ao mesmo tempo"
-                            subtitle: "Vale a partir da próxima vez que o app abrir"
-                            from: 1; to: 4; step: 1
-                            value: dlg.get("dlworkers")
-                            label: String(value)
-                            onMoved: (v) => dlg.set("dlworkers", v)
-                        }
-                        FieldRow {
-                            title: "Chave do Jamendo"
-                            subtitle: "Grátis em devportal.jamendo.com"
-                            text: dlg.get("jamendo") || ""
-                            onCommitted: (t) => dlg.set("jamendo", t)
-                        }
-                    }
-
                     // ======== Avançado ========
                     Group {
                         visible: dlg.page === "advanced"

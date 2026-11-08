@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.13
+Version:        0.7.14
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,11 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.14-1
+- Removida a Música livre (Jamendo e Internet Archive): sai da barra
+  lateral, a página, a chave do Jamendo e os downloads. As músicas já
+  baixadas continuam na biblioteca como arquivos locais comuns.
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.13-1
 - Editar informações da música (menu ⋮ ou lápis na página Informações):
   título, artista, álbum, artista do álbum, faixa, disco, ano, gênero,

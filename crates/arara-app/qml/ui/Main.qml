@@ -38,7 +38,7 @@ Window {
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
-        hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close",
+        hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
         edittags: true
     })
     property var prefs: prefDefaults
@@ -62,14 +62,13 @@ Window {
         library.setSetting(k, typeof d === "boolean" ? (v ? "1" : "0") : typeof d === "object" ? JSON.stringify(v) : String(v))
     }
     function resetPrefs() {
-        for (var k in prefDefaults) if (k !== "jamendo" && k !== "hidden" && k !== "collapsed") setPref(k, prefDefaults[k])
+        for (var k in prefDefaults) if (k !== "hidden" && k !== "collapsed") setPref(k, prefDefaults[k])
         toast.show("Preferências restauradas")
     }
     readonly property bool autoplay: prefs.autoplay
     readonly property bool trackListening: prefs.listening
     readonly property bool coverAccent: prefs.accent === "cover"
     readonly property bool autoLyrics: prefs.autolyrics
-    readonly property string jamendoKey: prefs.jamendo
     property var lyrics: ({ kind: "none" })
     property bool loadingLyrics: false
     // Blurred cover + sampled colours of the current track, for backgrounds.
@@ -202,13 +201,6 @@ Window {
         }
         onServerAdded: (ok, message) => { addServer.finished(ok, message); if (ok) toast.show(message) }
         onPlaylistsChanged: { sidebar.playlists = JSON.parse(library.playlistsJson()); if (nav.page === "playlist") nav.refresh() }
-        onFreeResults: (q, json, errs) => freePage.setResults(q, json, errs)
-        onDownloadEvent: (id, kind, pct, msg) => {
-            freePage.onEvent(id, kind, pct, msg)
-            if (kind === "done") toast.show(msg.endsWith("|lrc") ? "Baixada, com a letra sincronizada" : "Música baixada para a biblioteca")
-            else if (kind === "here") toast.show("Essa música já está na sua biblioteca")
-            else if (kind === "failed") toast.show("Não foi possível baixar: " + msg)
-        }
         onLyricsReady: (trackId, json) => {
             // qint64 arrives as an object in JS; compare as numbers
             if (player.current && player.current.id === Number(trackId)) { win.lyrics = JSON.parse(json); win.loadingLyrics = false }
@@ -707,7 +699,7 @@ Window {
             : page === "server" ? "Servidor"
             : page === "trackinfo" ? "Informações"
             : page === "tag" && tag ? "Similares"
-            : page === "songs" ? "Músicas" : page === "free" || page === "recap" ? "" : "Álbuns"
+            : page === "songs" ? "Músicas" : page === "recap" ? "" : "Álbuns"
     }
 
     // Now-playing panel → artist / album pages of the current track.
@@ -1124,23 +1116,6 @@ Window {
                     onOpenArtist: (id) => nav.openArtistById(id)
                     onOpenAlbum: (id) => nav.openAlbumById(id)
                     onTurnOn: win.setPref("listening", true)
-                }
-
-                FreePage {
-                    id: freePage
-                    anchors.fill: parent
-                    visible: nav.page === "free"
-                    jamendoKey: win.jamendoKey
-                    playingIndex: {
-                        var c = player.current
-                        if (!c || !c.free) return -1
-                        for (var i = 0; i < results.length; i++) if (results[i].stream_url === c.url) return i
-                        return -1
-                    }
-                    onPlay: (tracks, i) => player.playList(tracks, i)
-                    onDownload: (t) => { if (!library.downloadFree(JSON.stringify(t))) toast.show("Este artista não permite baixar esta música") }
-                    onCancel: (id) => library.cancelDownload(id)
-                    onSaveKey: (k) => { win.setPref("jamendo", k); toast.show("Chave do Jamendo salva"); if (lastQuery) search(lastQuery) }
                 }
 
                 LyricsScreen {
