@@ -7,6 +7,8 @@ Rectangle {
     id: row
     property var track
     property int number: 0
+    // Real track number on album pages ("" = row position, number + 1).
+    property string label: ""
     property bool showArt: false
     // Over the player panel's cover-coloured backdrop: white text.
     property bool onDark: false
@@ -77,7 +79,7 @@ Rectangle {
             Text {
                 visible: !row.showArt && !row.playing
                 anchors.centerIn: parent
-                text: row.number + 1
+                text: row.label !== "" ? row.label : row.number + 1
                 color: row.playing ? row.hiC : row.dimC
                 font.family: Theme.font; font.pointSize: Theme.fontSize - 1
             }

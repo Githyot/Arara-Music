@@ -32,6 +32,32 @@ Flickable {
     boundsBehavior: Flickable.StopAtBounds
     readonly property bool wide: width > 700
 
+    // Real track numbers: a song missing from the library leaves its number
+    // out (06, 09, 10…) and a quiet row says which ones are missing.
+    function discOf(t) { return t && t.discNo > 0 ? t.discNo : 1 }
+    readonly property bool multiDisc: {
+        for (var i = 1; i < tracks.length; i++) if (discOf(tracks[i]) !== discOf(tracks[0])) return true
+        return false
+    }
+    function discHeader(i) {
+        if (!multiDisc) return ""
+        if (i > 0 && discOf(tracks[i]) === discOf(tracks[i - 1])) return ""
+        return "Disco " + discOf(tracks[i])
+    }
+    function gapText(i) {
+        var t = tracks[i], cur = t && t.trackNo > 0 ? t.trackNo : 0
+        if (!cur) return ""
+        var prev = 0
+        if (i > 0 && discOf(tracks[i - 1]) === discOf(t)) {
+            prev = tracks[i - 1].trackNo > 0 ? tracks[i - 1].trackNo : -1
+            if (prev < 0) return ""
+        }
+        var a = prev + 1, b = cur - 1
+        if (b < a) return ""
+        return a === b ? "Faixa " + a + " não está na biblioteca"
+                       : "Faixas " + a + (b === a + 1 ? " e " : " a ") + b + " não estão na biblioteca"
+    }
+
     Item {
         id: body
         width: Math.min(page.width - 48, 1000)
@@ -123,17 +149,51 @@ Flickable {
                 width: parent.width
                 Repeater {
                     model: page.tracks
-                    TrackRow {
+                    Column {
+                        id: entry
                         required property var modelData
                         required property int index
                         width: col.width
-                        track: modelData
-                        number: index
-                        hideArtist: page.album && page.album.artist ? page.album.artist : ""
-                        playing: modelData.id === page.playingId
-                        onActivated: page.play(page.tracks, index)
-                        onMenuRequested: (t, x, y) => page.menuRequested(t, x, y)
-                        onStarToggled: (t, s) => page.starToggled(t, s)
+                        readonly property string disc: page.discHeader(index)
+                        readonly property string gap: page.gapText(index)
+                        // "Disco 2" when the album spans several discs.
+                        Text {
+                            visible: entry.disc !== ""
+                            width: parent.width; height: visible ? 40 : 0
+                            leftPadding: 14; verticalAlignment: Text.AlignBottom; bottomPadding: 6
+                            text: entry.disc
+                            color: Theme.dimFg
+                            font.family: Theme.font; font.pointSize: Theme.fontSize - 1; font.weight: Font.DemiBold
+                        }
+                        // Songs of the album that are not in the library.
+                        Item {
+                            visible: entry.gap !== ""
+                            width: parent.width; height: visible ? 30 : 0
+                            Row {
+                                anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+                                spacing: 12
+                                Text {
+                                    width: 22; horizontalAlignment: Text.AlignHCenter
+                                    text: "⋯"; color: Theme.dimFg; opacity: 0.7
+                                    font.family: Theme.font; font.pointSize: Theme.fontSize - 1
+                                }
+                                Text {
+                                    text: entry.gap; color: Theme.dimFg; opacity: 0.85
+                                    font.family: Theme.font; font.pointSize: Theme.fontSize - 2; font.italic: true
+                                }
+                            }
+                        }
+                        TrackRow {
+                            width: col.width
+                            track: entry.modelData
+                            number: entry.index
+                            label: entry.modelData.trackNo > 0 ? String(entry.modelData.trackNo) : ""
+                            hideArtist: page.album && page.album.artist ? page.album.artist : ""
+                            playing: entry.modelData.id === page.playingId
+                            onActivated: page.play(page.tracks, entry.index)
+                            onMenuRequested: (t, x, y) => page.menuRequested(t, x, y)
+                            onStarToggled: (t, s) => page.starToggled(t, s)
+                        }
                     }
                 }
             }

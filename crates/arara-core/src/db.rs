@@ -287,6 +287,10 @@ pub struct TrackRow {
     /// 0 = not explicit, 1 = explicit (tag, server or user), 2 = only the
     /// lyrics look explicit (shown when the preference allows).
     pub explicit: i64,
+    /// Track and disc numbers from the tags (or the file name), so an album
+    /// with missing songs shows the real numbers.
+    pub track_no: Option<i64>,
+    pub disc_no: Option<i64>,
 }
 
 impl TrackRow {
@@ -342,7 +346,8 @@ pub(crate) const TRACK_COLS: &str =
      (SELECT name FROM artists WHERE id = a.artist_id), t.format, t.sample_rate, t.bit_depth, t.bitrate,
      CASE WHEN COALESCE(t.explicit_user, t.explicit) = 1 THEN 1
           WHEN COALESCE(t.explicit_user, t.explicit) = 0 THEN 0
-          WHEN t.explicit_lyrics = 1 THEN 2 ELSE 0 END";
+          WHEN t.explicit_lyrics = 1 THEN 2 ELSE 0 END,
+     t.track_no, t.disc_no";
 
 #[derive(Debug, Clone)]
 pub struct AlbumRow {
@@ -553,6 +558,28 @@ impl Db {
                  INSERT OR REPLACE INTO kv(k, v) VALUES ('info_release_match', '2');",
             )?;
         }
+        // 0.7.32: files without a track-number tag take it from the file name
+        // ("09 - Song"), so albums with missing songs keep the real numbers.
+        let names_done: bool = conn.prepare("SELECT 1 FROM kv WHERE k = 'track_no_from_name'")?.exists([])?;
+        if !names_done {
+            let rows: Vec<(i64, String, Option<i64>)> = {
+                let mut st = conn.prepare(
+                    "SELECT id, path, disc_no FROM tracks WHERE track_no IS NULL AND path NOT LIKE 'remote://%'",
+                )?;
+                let it = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+                it.flatten().collect()
+            };
+            for (id, path, disc) in rows {
+                let stem = Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                if let Some((d, t)) = crate::scanner::number_from_filename(&stem) {
+                    conn.execute(
+                        "UPDATE tracks SET track_no = ?1, disc_no = ?2 WHERE id = ?3",
+                        params![t, disc.or(d.map(i64::from)), id],
+                    )?;
+                }
+            }
+            conn.execute("INSERT OR REPLACE INTO kv(k, v) VALUES ('track_no_from_name', '1')", [])?;
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre COLLATE NOCASE);
              CREATE INDEX IF NOT EXISTS tracks_added ON tracks(added_at);",
@@ -577,6 +604,8 @@ impl Db {
             && q("SELECT 1 FROM pragma_table_info('albums') WHERE name='cover_user'")
             // 0.7.13: song edits kept in the library.
             && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_overrides'")
+            // 0.7.32: track numbers taken from file names.
+            && q("SELECT 1 FROM kv WHERE k='track_no_from_name'")
     }
 
     /// Forget a hand-picked cover and mark the album's local files for the next
@@ -663,7 +692,10 @@ impl Db {
     }
 
     pub fn album_tracks(&self, album_id: i64) -> Result<Vec<TrackRow>> {
-        self.tracks_where("t.album_id = ?1 ORDER BY t.disc_no, t.track_no, t.title", [album_id])
+        self.tracks_where(
+            "t.album_id = ?1 ORDER BY COALESCE(t.disc_no, 1), t.track_no IS NULL, t.track_no, t.path COLLATE NATSORT",
+            [album_id],
+        )
     }
 
     pub fn track(&self, id: i64) -> Result<Option<TrackRow>> {
@@ -1082,6 +1114,8 @@ pub(crate) fn map_track(r: &rusqlite::Row) -> rusqlite::Result<TrackRow> {
         bit_depth: r.get(16)?,
         bitrate: r.get(17)?,
         explicit: r.get(18)?,
+        track_no: r.get(19)?,
+        disc_no: r.get(20)?,
     })
 }
 
