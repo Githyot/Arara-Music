@@ -437,6 +437,11 @@ pub mod qobject {
         #[cxx_name = "clearMotionCovers"]
         fn clear_motion_covers(self: Pin<&mut Library>) -> i32;
 
+        /// Albums whose animated cover is on disk (same shape as albumsJson), A–Z.
+        #[qinvokable]
+        #[cxx_name = "motionAlbumsJson"]
+        fn motion_albums_json(self: &Library) -> QString;
+
         /// {"files": n, "bytes": n} of the animated cover cache.
         #[qinvokable]
         #[cxx_name = "motionCacheJson"]
@@ -1763,6 +1768,30 @@ impl qobject::Library {
     pub fn clear_motion_covers(self: Pin<&mut Self>) -> i32 {
         let Some(db) = self.db.as_ref() else { return 0 };
         arara_core::motion::clear(db, &self.motion_dir()) as i32
+    }
+
+    pub fn motion_albums_json(&self) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let dir = self.motion_dir();
+        // key → file, for every album that got an animated cover
+        let files: std::collections::HashMap<String, String> = db.conn
+            .prepare("SELECT substr(k, 8), v FROM kv WHERE k LIKE 'motion:%'")
+            .and_then(|mut st| st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let f = serde_json::from_str::<serde_json::Value>(&v).ok()?["file"].as_str()?.to_owned();
+                dir.join(&f).exists().then_some((k, f))
+            })
+            .collect();
+        if files.is_empty() {
+            return qs("[]");
+        }
+        let mut albums: Vec<_> = db.albums().unwrap_or_default().into_iter()
+            .filter(|a| files.contains_key(&arara_core::motion::key(a.artist.as_deref().unwrap_or(""), &a.title)))
+            .collect();
+        albums.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        qs(&serde_json::Value::Array(albums.iter().map(|a| self.album_value(a)).collect()).to_string())
     }
 
     pub fn motion_cache_json(&self) -> QString {

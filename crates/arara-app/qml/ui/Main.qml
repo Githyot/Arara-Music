@@ -1457,6 +1457,7 @@ Window {
         onChooseFolders: { foldersDialog.dirs = JSON.parse(library.libraryDirsJson()); foldersDialog.open() }
         onRescan: { library.changeLibraryDir(library.libraryDir); toast.show("Reindexando a biblioteca…") }
         onRebuildCovers: { library.rebuildCovers(); toast.show("Refazendo as capas dos álbuns…") }
+        onOpenAlbum: (id) => { prefsDialog.close(); win.lyricsMode = false; nav.openAlbumById(id) }
         onResetAll: prompt.confirm("Restaurar as preferências?", "Tema, cores, reprodução e letras voltam ao padrão.", "Restaurar", function () { win.resetPrefs() })
         onClearHistory: prompt.confirm("Apagar o histórico de escuta?", "Todas as retrospectivas voltam a zero. Não dá para desfazer.", "Apagar", function () {
             listen.restart(); library.clearListens(); recapPage.reload(); toast.show("Histórico de escuta apagado")
