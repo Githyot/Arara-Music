@@ -20,6 +20,11 @@ fn main() {
     if std::env::var_os("QT_QUICK_CONTROLS_STYLE").is_none() {
         std::env::set_var("QT_QUICK_CONTROLS_STYLE", "Basic");
     }
+    // The Wayland app_id (and the X11 hint GNOME uses) must match the
+    // installed .desktop file, otherwise GNOME shows the running window with
+    // a generic icon. Without this Qt builds the id from the organization
+    // domain and the binary name ("githyot.github.io.arara-music").
+    QGuiApplication::set_desktop_file_name(&QString::from("io.github.Githyot.AraraMusic"));
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {
         app.as_mut().set_application_name(&QString::from("Arara Music"));
