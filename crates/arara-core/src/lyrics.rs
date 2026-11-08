@@ -524,6 +524,109 @@ fn sidecar(path: &Path) -> Option<(Option<String>, Option<String>)> {
     std::fs::read_to_string(txt).ok().map(|s| (None, Some(s)))
 }
 
+/// Whether lyrics found online should also be written next to the song file
+/// (`pref:lrcbeside`, on unless turned off in Preferences).
+pub fn save_beside_enabled(db: &Db) -> bool {
+    db.get_kv("pref:lrcbeside").ok().flatten().as_deref() != Some("0")
+}
+
+/// What happened when writing a sidecar file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidecarWrite {
+    /// `song.lrc` / `song.txt` written.
+    Written,
+    /// A sidecar was already there (never overwritten unless asked), or nothing to write.
+    Kept,
+}
+
+/// Write lyrics next to the track: synced → `song.lrc`, words only → `song.txt`.
+/// Without `overwrite`, an existing file is left alone, and a `.txt` is not added
+/// when a `.lrc` is already there. Written through `*.part` + rename so a full or
+/// unplugged disk never leaves half a file. Remote (server) tracks are skipped.
+pub fn write_sidecar(track_path: &str, synced: Option<&str>, plain: Option<&str>, overwrite: bool) -> std::io::Result<SidecarWrite> {
+    if crate::remote::is_remote(track_path) {
+        return Ok(SidecarWrite::Kept);
+    }
+    let synced = synced.filter(|s| !s.trim().is_empty() && looks_synced(s));
+    let plain = plain.filter(|s| !s.trim().is_empty());
+    let (ext, text) = match (synced, plain) {
+        (Some(s), _) => ("lrc", s),
+        (None, Some(p)) => ("txt", p),
+        _ => return Ok(SidecarWrite::Kept),
+    };
+    let path = Path::new(track_path);
+    let dest = path.with_extension(ext);
+    if !overwrite && (dest.exists() || (ext == "txt" && path.with_extension("lrc").exists())) {
+        return Ok(SidecarWrite::Kept);
+    }
+    let mut text = text.replace("\r\n", "\n");
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    let tmp = path.with_extension(format!("{ext}.part"));
+    let res = std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &dest));
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res.map(|_| SidecarWrite::Written)
+}
+
+/// Result of [`export_sidecars`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ExportReport {
+    pub written: usize,
+    /// Already had a `.lrc`/`.txt` beside it.
+    pub kept: usize,
+    /// Folder can't be written (read-only, no permission, locked disk).
+    pub failed: usize,
+    /// Song file not reachable right now (disk unplugged, file moved).
+    pub missing: usize,
+}
+
+/// Copy every downloaded (LRCLIB) or hand-made lyrics in the database to a file next
+/// to its song, without overwriting existing ones. Once a folder refuses a write, the
+/// rest of that folder is skipped so a read-only disk doesn't cost one error per song.
+/// `progress(done, total)` is called now and then. Meant for a background thread.
+pub fn export_sidecars(db: &Db, mut progress: impl FnMut(usize, usize)) -> Result<ExportReport> {
+    let rows: Vec<(String, Option<String>, Option<String>)> = {
+        let mut st = db.conn.prepare(
+            "SELECT t.path, l.synced, l.plain FROM lyrics l JOIN tracks t ON t.id = l.track_id
+             WHERE l.source IN ('lrclib', 'user') AND (l.synced IS NOT NULL OR l.plain IS NOT NULL)
+             ORDER BY t.path",
+        )?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.flatten().filter(|(p, _, _): &(String, _, _)| !crate::remote::is_remote(p)).collect()
+    };
+    let total = rows.len();
+    let mut rep = ExportReport::default();
+    let mut bad_dirs: std::collections::HashSet<std::path::PathBuf> = Default::default();
+    for (i, (path, synced, plain)) in rows.iter().enumerate() {
+        if i % 25 == 0 {
+            progress(i, total);
+        }
+        let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
+        if bad_dirs.contains(&dir) {
+            rep.failed += 1;
+            continue;
+        }
+        if !Path::new(path).exists() {
+            rep.missing += 1;
+            continue;
+        }
+        match write_sidecar(path, synced.as_deref(), plain.as_deref(), false) {
+            Ok(SidecarWrite::Written) => rep.written += 1,
+            Ok(SidecarWrite::Kept) => rep.kept += 1,
+            Err(e) => {
+                log::info!("can't write lyrics beside {path}: {e}");
+                rep.failed += 1;
+                bad_dirs.insert(dir);
+            }
+        }
+    }
+    progress(total, total);
+    Ok(rep)
+}
+
 fn embedded(path: &Path) -> Option<String> {
     use lofty::file::TaggedFileExt;
     use lofty::tag::ItemKey;
@@ -580,6 +683,13 @@ pub fn resolve(db: &Db, client: Option<&LrclibClient>, track_id: i64) -> Result<
         match c.find(&t.title, &t.artist, &album, dur / 1000) {
             Ok(Some(r)) if r.synced_lyrics.is_some() || local.is_none() => {
                 db.store_lyrics(track_id, "lrclib", r.synced_lyrics.as_deref(), r.plain_lyrics.as_deref(), now())?;
+                if save_beside_enabled(db) {
+                    // Kept with the music, so it survives a lost database. A read-only
+                    // folder just keeps the copy in the database.
+                    if let Err(e) = write_sidecar(&t.path, r.synced_lyrics.as_deref(), r.plain_lyrics.as_deref(), false) {
+                        log::info!("can't write lyrics beside {}: {e}", t.path);
+                    }
+                }
                 return Ok(to_lyrics(r.synced_lyrics, r.plain_lyrics, dur));
             }
             Ok(_) => {
@@ -607,6 +717,72 @@ pub fn resolve(db: &Db, client: Option<&LrclibClient>, track_id: i64) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidecar_written_once_and_never_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let song = tmp.path().join("Faixa.mp3");
+        std::fs::write(&song, b"x").unwrap();
+        let p = song.to_str().unwrap();
+        let lrc = "[00:01.00]Olá\r\n[00:02.00]mundo";
+        assert_eq!(write_sidecar(p, Some(lrc), Some("Olá"), false).unwrap(), SidecarWrite::Written);
+        assert_eq!(std::fs::read_to_string(tmp.path().join("Faixa.lrc")).unwrap(), "[00:01.00]Olá\n[00:02.00]mundo\n");
+        // existing .lrc: kept, and no .txt next to it
+        assert_eq!(write_sidecar(p, Some("[00:05.00]outra"), None, false).unwrap(), SidecarWrite::Kept);
+        assert_eq!(write_sidecar(p, None, Some("só palavras"), false).unwrap(), SidecarWrite::Kept);
+        assert!(!tmp.path().join("Faixa.txt").exists());
+        assert!(!tmp.path().join("Faixa.lrc.part").exists());
+        // words only → .txt
+        let song2 = tmp.path().join("Outra.flac");
+        assert_eq!(write_sidecar(song2.to_str().unwrap(), None, Some("palavras"), false).unwrap(), SidecarWrite::Written);
+        assert!(tmp.path().join("Outra.txt").exists());
+        // server tracks have no folder
+        assert_eq!(write_sidecar("remote://1/abc", Some(lrc), None, false).unwrap(), SidecarWrite::Kept);
+    }
+
+    #[test]
+    fn export_copies_db_lyrics_beside_songs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Db::open_in_memory().unwrap();
+        let ar = db.artist_id("Arara").unwrap();
+        let al = db.album_id("Voo", ar, None, 0).unwrap();
+        let ro = tmp.path().join("somente-leitura");
+        std::fs::create_dir(&ro).unwrap();
+        let files = [
+            tmp.path().join("a.mp3"),
+            tmp.path().join("b.mp3"),
+            tmp.path().join("sumiu.mp3"),
+            ro.join("c.mp3"),
+            ro.join("d.mp3"),
+        ];
+        for (i, f) in files.iter().enumerate() {
+            if !f.ends_with("sumiu.mp3") {
+                std::fs::write(f, b"x").unwrap();
+            }
+            db.conn
+                .execute(
+                    "INSERT INTO tracks(path, mtime, size, title, artist, album_id) VALUES (?1,0,0,'t','Arara',?2)",
+                    rusqlite::params![f.to_str().unwrap(), al],
+                )
+                .unwrap();
+            let src = if i == 1 { "user" } else { "lrclib" };
+            db.store_lyrics(i as i64 + 1, src, Some("[00:01.00]oi"), None, 0).unwrap();
+        }
+        std::fs::write(tmp.path().join("b.lrc"), "minha").unwrap();
+        let mut perm = std::fs::metadata(&ro).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&ro, perm.clone()).unwrap();
+        let root = std::fs::write(ro.join("teste"), b"").is_ok(); // root ignores permissions
+        let rep = export_sidecars(&db, |_, _| {}).unwrap();
+        perm.set_readonly(false);
+        std::fs::set_permissions(&ro, perm).unwrap();
+        assert_eq!(std::fs::read_to_string(tmp.path().join("a.lrc")).unwrap(), "[00:01.00]oi\n");
+        assert_eq!(std::fs::read_to_string(tmp.path().join("b.lrc")).unwrap(), "minha");
+        assert_eq!(rep.missing, 1);
+        if !root {
+            assert_eq!((rep.written, rep.kept, rep.failed), (1, 1, 2));
+        }
+    }
 
     #[test]
     fn writes_and_rereads_lrc() {

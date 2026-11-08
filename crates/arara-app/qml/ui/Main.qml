@@ -33,7 +33,7 @@ Window {
         theme: "gnome", scheme: "system", accent: "theme", panelcolors: true,
         tilesize: "medium", fontscale: 1.0, compact: false, reducemotion: false,
         replaygain: true, rgmode: "track", preamp: 0, autoplay: false, restore: true, remaining: true,
-        autolyrics: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
+        autolyrics: true, lrcbeside: true, lyricspanel: true, duets: true, lyricsscale: 1, lyricsoffset: 0,
         explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true, infoprefetch: true, infofiles: true, listening: true, motioncovers: false,
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
@@ -1320,6 +1320,7 @@ Window {
 
     LyricsEditor {
         id: lyricsEditor
+        saveBeside: win.prefs.lrcbeside
         parent: frame
         anchors.fill: parent
         anchors.bottomMargin: playerBar.visible ? playerBar.height : 0

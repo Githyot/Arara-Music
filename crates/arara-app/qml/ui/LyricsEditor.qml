@@ -18,6 +18,7 @@ Rectangle {
     property int cursor: 0
     property bool saved: false
     property bool publishing: false
+    property bool saveBeside: true      // Preferences › Letras › "Salvar ao lado das músicas"
     signal seek(real ms)
     signal togglePlay()
     signal save(string text, bool synced, bool sidecar)
@@ -29,6 +30,7 @@ Rectangle {
 
     function openWith(t, lyrics) {
         track = t; saved = false; publishing = false; step = "text"; cursor = 0
+        sidecar.checked = saveBeside
         if (lyrics.kind === "synced") {
             lines = lyrics.lines.filter(function (l) { return l.text !== "" }).map(function (l) { return { text: l.text, t: l.t } })
             editor.text = lines.map(function (l) { return l.text }).join("\n")
