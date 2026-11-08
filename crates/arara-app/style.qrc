@@ -69,6 +69,7 @@
     <file alias="icons/autoplay.svg">qml/style/icons/autoplay.svg</file>
     <file alias="icons/plays.svg">qml/style/icons/plays.svg</file>
     <file alias="icons/recap.svg">qml/style/icons/recap.svg</file>
+    <file alias="icons/home.svg">qml/style/icons/home.svg</file>
     <file alias="icons/added.svg">qml/style/icons/added.svg</file>
     <file alias="icons/year.svg">qml/style/icons/year.svg</file>
     <file alias="icons/genre.svg">qml/style/icons/genre.svg</file>

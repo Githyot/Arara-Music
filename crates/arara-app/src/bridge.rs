@@ -121,6 +121,16 @@ pub mod qobject {
         #[cxx_name = "mostPlayedJson"]
         fn most_played_json(self: &Library) -> QString;
 
+        /// Everything the home page ("Início") shows, in one call.
+        #[qinvokable]
+        #[cxx_name = "homeJson"]
+        fn home_json(self: &Library, seed: i64) -> QString;
+
+        /// Random songs for the home page's shuffle buttons: kind is "all" or "starred".
+        #[qinvokable]
+        #[cxx_name = "shuffleJson"]
+        fn shuffle_json(self: &Library, kind: &QString, count: i32) -> QString;
+
         /// Returns the new starred state.
         #[qinvokable]
         #[cxx_name = "setStarred"]
@@ -1100,6 +1110,43 @@ impl qobject::Library {
     pub fn most_played_json(&self) -> QString {
         let Some(db) = &self.db else { return qs("[]") };
         self.tracks_to_json(db.most_played(50))
+    }
+
+    pub fn home_json(&self, seed: i64) -> QString {
+        let Some(db) = &self.db else { return qs("{}") };
+        let albums = |r: arara_core::Result<Vec<arara_core::db::AlbumRow>>| -> Vec<serde_json::Value> {
+            r.unwrap_or_default().iter().map(|a| self.album_value(a)).collect()
+        };
+        let tracks = |r: arara_core::Result<Vec<arara_core::db::TrackRow>>| -> Vec<serde_json::Value> {
+            r.unwrap_or_default().iter().map(|t| self.track_value(t)).collect()
+        };
+        let artists: Vec<_> = db
+            .top_artists(12)
+            .unwrap_or_default()
+            .iter()
+            .map(|a| json!({ "id": a.id, "name": a.name, "albums": a.album_count, "cover": self.cover(&a.cover_hash, 256) }))
+            .collect();
+        let starred = db.random_starred(1).map(|v| !v.is_empty()).unwrap_or(false);
+        let v = json!({
+            "recentAlbums": albums(db.recent_albums(12)),
+            "addedAlbums": albums(db.added_albums(12)),
+            "rediscover": albums(db.rediscover_albums(30, now(), seed, 12)),
+            "topArtists": artists,
+            "topTracks": tracks(db.most_played(10)),
+            "recentTracks": tracks(db.recent_tracks(10)),
+            "hasStarred": starred,
+        });
+        qs(&v.to_string())
+    }
+
+    pub fn shuffle_json(&self, kind: &QString, count: i32) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let n = count.clamp(1, 2000) as i64;
+        if kind.to_string() == "starred" {
+            self.tracks_to_json(db.random_starred(n))
+        } else {
+            self.tracks_to_json(db.random_tracks(n))
+        }
     }
 
     pub fn set_starred(self: Pin<&mut Self>, track_id: i64, starred: bool) -> bool {
