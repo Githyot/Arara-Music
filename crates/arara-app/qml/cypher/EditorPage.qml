@@ -810,6 +810,17 @@ Rectangle {
                                             }
                                         }
                                         AppButton {
+                                            // Cópia da parte inteira (acordes, batida, tab, repetições) logo depois dela.
+                                            text: "Duplicar parte"
+                                            onClicked: {
+                                                var copy = JSON.parse(JSON.stringify(secCard.modelData))
+                                                copy.name = (copy.name || "Parte") + " (cópia)"
+                                                copy._open = true
+                                                page.draft.sections.splice(secCard.index + 1, 0, copy)
+                                                page.bump()
+                                            }
+                                        }
+                                        AppButton {
                                             text: "Apagar"
                                             onClicked: { page.draft.sections.splice(secCard.index, 1); page.bump() }
                                         }
