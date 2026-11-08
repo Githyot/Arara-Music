@@ -50,6 +50,12 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
   arquivo quando não há tag), ordena por disco e faixa e avisa quais
   músicas do álbum não estão na biblioteca.
 
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.31-1
+- Junta na main tudo até a 0.7.30 (PRs #13 e #14).
+- Ícone da arara no dock e no Alt+Tab do GNOME com o app aberto: a janela
+  agora se identifica como io.github.Githyot.AraraMusic, o mesmo nome do
+  atalho instalado (antes aparecia a engrenagem genérica).
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.30-1
 - Versão única com a 0.7.28 (trecho preferido) e a 0.7.29 (letras da
   palavra crescendo aos poucos no karaokê).
