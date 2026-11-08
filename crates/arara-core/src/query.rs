@@ -130,7 +130,7 @@ impl Db {
     pub fn query_tracks(&self, q: &str, sort: &str, limit: i64) -> Result<Vec<TrackRow>> {
         let p = parse(q);
         let mut sql = format!("SELECT {TRACK_COLS} FROM tracks t LEFT JOIN albums a ON a.id = t.album_id");
-        let mut wh: Vec<String> = Vec::new();
+        let mut wh: Vec<String> = vec!["t.dup_of IS NULL".into()];
         let mut args: Vec<Value> = Vec::new();
         if !p.text.is_empty() {
             let fts = p
@@ -175,7 +175,7 @@ impl Db {
         if p.starred {
             wh.push("t.starred = 1".into());
         }
-        if !wh.is_empty() {
+        {
             sql.push_str(" WHERE ");
             sql.push_str(&wh.join(" AND "));
         }
@@ -193,10 +193,11 @@ impl Db {
     pub fn groups(&self, kind: &str) -> Result<Vec<GroupRow>> {
         let cover = "MAX(COALESCE(a.cover_hash, t.cover_hash))";
         let from = "FROM tracks t LEFT JOIN albums a ON a.id = t.album_id";
+        let from = &format!("{from} WHERE t.dup_of IS NULL AND");
         let sql = match kind {
-            "genre" => format!("SELECT t.genre, COUNT(*), {cover} {from} WHERE t.genre IS NOT NULL AND t.genre != '' GROUP BY t.genre COLLATE NOCASE ORDER BY t.genre COLLATE NATSORT"),
-            "composer" => format!("SELECT t.composer, COUNT(*), {cover} {from} WHERE t.composer IS NOT NULL AND t.composer != '' GROUP BY t.composer COLLATE NOCASE ORDER BY t.composer COLLATE NATSORT"),
-            "year" => format!("SELECT CAST(COALESCE(t.year, a.year) AS TEXT), COUNT(*), {cover} {from} WHERE COALESCE(t.year, a.year) > 0 GROUP BY COALESCE(t.year, a.year) ORDER BY COALESCE(t.year, a.year) DESC"),
+            "genre" => format!("SELECT t.genre, COUNT(*), {cover} {from} t.genre IS NOT NULL AND t.genre != '' GROUP BY t.genre COLLATE NOCASE ORDER BY t.genre COLLATE NATSORT"),
+            "composer" => format!("SELECT t.composer, COUNT(*), {cover} {from} t.composer IS NOT NULL AND t.composer != '' GROUP BY t.composer COLLATE NOCASE ORDER BY t.composer COLLATE NATSORT"),
+            "year" => format!("SELECT CAST(COALESCE(t.year, a.year) AS TEXT), COUNT(*), {cover} {from} COALESCE(t.year, a.year) > 0 GROUP BY COALESCE(t.year, a.year) ORDER BY COALESCE(t.year, a.year) DESC"),
             "folder" => return self.folder_groups(),
             _ => return Ok(vec![]),
         };
@@ -219,7 +220,7 @@ impl Db {
     fn folder_groups(&self) -> Result<Vec<GroupRow>> {
         let mut st = self.conn.prepare(
             "SELECT t.path, COALESCE(a.cover_hash, t.cover_hash) FROM tracks t LEFT JOIN albums a ON a.id = t.album_id
-             WHERE t.path NOT LIKE 'remote://%'",
+             WHERE t.path NOT LIKE 'remote://%' AND t.dup_of IS NULL",
         )?;
         let mut map: std::collections::BTreeMap<String, (i64, Option<String>)> = Default::default();
         for r in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
@@ -275,7 +276,7 @@ impl Db {
                 break;
             }
             let sql = format!(
-                "SELECT {TRACK_COLS} FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE {clause} ORDER BY random() LIMIT {}",
+                "SELECT {TRACK_COLS} FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE t.dup_of IS NULL AND {clause} ORDER BY random() LIMIT {}",
                 quota + seen.len().min(400)
             );
             let mut st = self.conn.prepare(&sql)?;

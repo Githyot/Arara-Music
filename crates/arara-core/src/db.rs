@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     explicit_lyrics INTEGER,        -- guess from the lyrics (see explicit.rs)
     explicit_user   INTEGER,        -- the user's choice, overrides both
     art_hash        TEXT,           -- embedded front cover of this file (local files)
-    folder_art      TEXT            -- cover.jpg/folder.jpg next to this file
+    folder_art      TEXT,           -- cover.jpg/folder.jpg next to this file
+    dup_of          INTEGER         -- repeated song: id of the better copy shown instead (see dupes.rs)
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id, disc_no, track_no);
 
@@ -553,6 +554,14 @@ impl Db {
                  INSERT OR REPLACE INTO kv(k, v) VALUES ('info_release_match', '2');",
             )?;
         }
+        // 0.7.34: repeated songs show only their best copy.
+        let has_dup: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('tracks') WHERE name='dup_of'")?
+            .exists([])?;
+        if !has_dup {
+            conn.execute_batch("ALTER TABLE tracks ADD COLUMN dup_of INTEGER;")?;
+            crate::dupes::mark(&conn)?;
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre COLLATE NOCASE);
              CREATE INDEX IF NOT EXISTS tracks_added ON tracks(added_at);",
@@ -577,6 +586,7 @@ impl Db {
             && q("SELECT 1 FROM pragma_table_info('albums') WHERE name='cover_user'")
             // 0.7.13: song edits kept in the library.
             && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_overrides'")
+            && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='dup_of'")
     }
 
     /// Forget a hand-picked cover and mark the album's local files for the next
@@ -644,7 +654,7 @@ impl Db {
     pub fn albums(&self) -> Result<Vec<AlbumRow>> {
         let mut st = self.conn.prepare_cached(
             "SELECT a.id, a.title, ar.name, a.year, a.cover_hash,
-                    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id), a.artist_id
+                    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id AND t.dup_of IS NULL), a.artist_id
              FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id
              ORDER BY ar.name COLLATE NATSORT, a.year, a.title COLLATE NATSORT",
         )?;
@@ -659,15 +669,18 @@ impl Db {
                 artist_id: r.get(6)?,
             })
         })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        // An album whose songs are all hidden copies of another one stays out.
+        let all: Vec<AlbumRow> = rows.collect::<std::result::Result<_, _>>()?;
+        Ok(all.into_iter().filter(|a| a.track_count > 0).collect())
     }
 
     pub fn album_tracks(&self, album_id: i64) -> Result<Vec<TrackRow>> {
         self.tracks_where("t.album_id = ?1 ORDER BY t.disc_no, t.track_no, t.title", [album_id])
     }
 
+    /// Any track by id, hidden copies included (queue, history).
     pub fn track(&self, id: i64) -> Result<Option<TrackRow>> {
-        Ok(self.tracks_where("t.id = ?1", [id])?.into_iter().next())
+        Ok(self.tracks_where_all("t.id = ?1", [id])?.into_iter().next())
     }
 
     /// Full-text search; `query` is matched as prefix terms ("beat yel" finds "Yellow Submarine – The Beatles").
@@ -684,13 +697,18 @@ impl Db {
             &format!("SELECT {TRACK_COLS}
              FROM tracks_fts f JOIN tracks t ON t.id = f.rowid
              LEFT JOIN albums a ON a.id = t.album_id
-             WHERE tracks_fts MATCH ?1 ORDER BY rank LIMIT ?2"),
+             WHERE tracks_fts MATCH ?1 AND t.dup_of IS NULL ORDER BY rank LIMIT ?2"),
         )?;
         let rows = st.query_map(params![fts, limit], map_track)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// Tracks the app lists: repeated songs show only their kept copy.
     fn tracks_where<P: rusqlite::Params>(&self, clause: &str, p: P) -> Result<Vec<TrackRow>> {
+        self.tracks_where_all(&format!("t.dup_of IS NULL AND {clause}"), p)
+    }
+
+    fn tracks_where_all<P: rusqlite::Params>(&self, clause: &str, p: P) -> Result<Vec<TrackRow>> {
         let sql = format!(
             "SELECT {TRACK_COLS}
              FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE {clause}"
@@ -782,7 +800,7 @@ impl Db {
     fn albums_query(&self, join: &str, order: &str, p: impl rusqlite::Params) -> Result<Vec<AlbumRow>> {
         let sql = format!(
             "SELECT a.id, a.title, ar.name, a.year, a.cover_hash,
-                    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id), a.artist_id
+                    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id AND t.dup_of IS NULL), a.artist_id
              FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id {join} ORDER BY {order}"
         );
         let mut st = self.conn.prepare_cached(&sql)?;
@@ -862,7 +880,12 @@ impl Db {
     pub fn tracks_by_ids(&self, ids: &[i64]) -> Result<Vec<TrackRow>> {
         let mut out = Vec::with_capacity(ids.len());
         for id in ids {
-            if let Some(t) = self.track(*id)? {
+            // A song saved before its copy was hidden comes back as the kept one.
+            let id: i64 = self.conn
+                .query_row("SELECT COALESCE(dup_of, id) FROM tracks WHERE id = ?1", [id], |r| r.get(0))
+                .optional()?
+                .unwrap_or(*id);
+            if let Some(t) = self.track(id)? {
                 out.push(t);
             }
         }
@@ -1000,7 +1023,8 @@ impl Db {
             return self.query_tracks(&q, sort.as_deref().unwrap_or(""), lim.unwrap_or(0));
         }
         let mut st = self.conn.prepare_cached(&format!(
-            "SELECT {TRACK_COLS} FROM playlist_items i JOIN tracks t ON t.id = i.track_id
+            "SELECT {TRACK_COLS} FROM playlist_items i JOIN tracks o ON o.id = i.track_id
+             JOIN tracks t ON t.id = COALESCE(o.dup_of, o.id)
              LEFT JOIN albums a ON a.id = t.album_id WHERE i.playlist_id = ?1 ORDER BY i.pos"
         ))?;
         let rows = st.query_map([playlist_id], map_track)?;
@@ -1023,7 +1047,7 @@ impl Db {
 
     pub fn counts(&self) -> Result<(i64, i64, i64)> {
         Ok(self.conn.query_row(
-            "SELECT (SELECT COUNT(*) FROM tracks), (SELECT COUNT(*) FROM albums), (SELECT COUNT(*) FROM artists)",
+            "SELECT (SELECT COUNT(*) FROM tracks WHERE dup_of IS NULL), (SELECT COUNT(*) FROM albums), (SELECT COUNT(*) FROM artists)",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?)

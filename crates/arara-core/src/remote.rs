@@ -750,6 +750,7 @@ pub fn sync(db: &mut Db, covers: &CoverCache, server: &Server, mut progress: imp
         params![now, tracks.len() as i64, server.id],
     )
     .map_err(|x| x.to_string())?;
+    crate::dupes::mark(&txn).map_err(e)?;
     txn.commit().map_err(|x| x.to_string())?;
     stats.elapsed_ms = t0.elapsed().as_millis();
     Ok(stats)

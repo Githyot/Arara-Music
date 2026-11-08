@@ -39,7 +39,7 @@ Window {
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true, xflatency: 160,
         hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
-        edittags: true
+        edittags: true, hidedupes: true
     })
     property var prefs: prefDefaults
     function loadPrefs() {
