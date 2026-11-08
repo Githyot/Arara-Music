@@ -118,6 +118,39 @@ fn file_sig(p: &Path) -> Option<(i64, i64)> {
     Some((mtime, md.len() as i64))
 }
 
+/// Track (and disc) number written at the start of a file name, used when the
+/// tags have none: "09 - Song", "09. Song", "1-09 Song", "2.03_Song", "(07) Song".
+/// A bare number needs a separator after it ("99 Luftballons" is a title,
+/// "09 Song" with a leading zero is a track).
+pub fn number_from_filename(stem: &str) -> Option<(Option<u32>, u32)> {
+    let s = stem.trim_start().trim_start_matches(['(', '[']);
+    let digits = |s: &str| s.bytes().take_while(u8::is_ascii_digit).count();
+    let n1 = digits(s);
+    if n1 == 0 || n1 > 3 {
+        return None;
+    }
+    let (first, rest) = s.split_at(n1);
+    // "1-09" / "2.03": a one-digit disc, then a two- or three-digit track.
+    if n1 == 1 {
+        if let Some(r) = rest.strip_prefix(['-', '.']) {
+            let n2 = digits(r);
+            if (2..=3).contains(&n2) {
+                let (second, tail) = r.split_at(n2);
+                if tail.is_empty() || tail.starts_with([' ', '-', '.', '_', ')', ']']) {
+                    let (d, t): (u32, u32) = (first.parse().ok()?, second.parse().ok()?);
+                    return (d > 0 && t > 0).then_some((Some(d), t));
+                }
+            }
+        }
+    }
+    let after = rest.trim_start();
+    let separated = after.starts_with(['.', '-', '_', ')', ']', '–'])
+        || (after.len() < rest.len() && first.starts_with('0'))
+        || (rest.is_empty());
+    let t: u32 = first.parse().ok()?;
+    (separated && t > 0).then_some((None, t))
+}
+
 fn parse_gain(s: Option<&str>) -> Option<f64> {
     s?.trim().trim_end_matches("dB").trim().parse().ok()
 }
@@ -188,7 +221,7 @@ fn parse_file(
                 art = front_picture(t).and_then(|pic| covers.store(pic.data()).ok());
                 let picture = if album_s.is_empty() { art.clone() } else { None };
                 (
-                    t.title().map(|s| s.into_owned()).unwrap_or(stem),
+                    t.title().map(|s| s.into_owned()).unwrap_or_else(|| stem.clone()),
                     artist,
                     album_artist,
                     t.album().map(|s| s.into_owned()).filter(|s| !s.is_empty()),
@@ -202,8 +235,13 @@ fn parse_file(
                     t.get_string(&ItemKey::Composer).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()),
                 )
             }
-            None => (stem, String::new(), String::new(), None, None, None, None, None, None, None, None, None),
+            None => (stem.clone(), String::new(), String::new(), None, None, None, None, None, None, None, None, None),
         };
+    // Untagged numbers come from the file name, so an album with missing
+    // songs still shows (and sorts by) the real track numbers.
+    let from_name = if track_no.is_none() { number_from_filename(&stem) } else { None };
+    let track_no = track_no.or(from_name.map(|(_, t)| t));
+    let disc_no = disc_no.or(from_name.and_then(|(d, _)| d));
 
     // Store titles like "Song (Explicit)" or "Song [Explicit Version]".
     let explicit = explicit.or_else(|| {
@@ -400,6 +438,7 @@ pub fn scan(
         })?;
         if stats.parsed > 0 || stats.removed > 0 {
             stats.covers_written = crate::db::pick_album_covers(&txn)?;
+            crate::dupes::mark(&txn)?;
         }
         txn.commit()?;
         Ok(())
@@ -552,5 +591,30 @@ mod cover_vote_tests {
         scan(&mut db, &covers, &[music], |_| {}).unwrap();
         let h = blake3::hash(&folder).to_hex()[..32].to_string();
         assert_eq!(album_cover(&db, "Alb").as_deref(), Some(h.as_str()));
+    }
+}
+
+#[cfg(test)]
+mod filename_number_tests {
+    use super::number_from_filename as n;
+
+    #[test]
+    fn reads_track_numbers_from_names() {
+        assert_eq!(n("09 - Ninguém Entende Você"), Some((None, 9)));
+        assert_eq!(n("11. Beco Sem Saída"), Some((None, 11)));
+        assert_eq!(n("06_Uma Criança"), Some((None, 6)));
+        assert_eq!(n("07 Song"), Some((None, 7)));
+        assert_eq!(n("(03) Song"), Some((None, 3)));
+        assert_eq!(n("1-09 Song"), Some((Some(1), 9)));
+        assert_eq!(n("2.03 - Song"), Some((Some(2), 3)));
+        assert_eq!(n("12"), Some((None, 12)));
+    }
+
+    #[test]
+    fn leaves_titles_alone() {
+        assert_eq!(n("99 Luftballons"), None);
+        assert_eq!(n("1979 - Smashing"), None);
+        assert_eq!(n("Song 09"), None);
+        assert_eq!(n("00 - Intro"), None);
     }
 }

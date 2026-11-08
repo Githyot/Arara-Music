@@ -50,7 +50,22 @@ Item {
             if (dlg.motionListOpen && dlg.motionFiles !== before) dlg.refreshMotionAlbums()
         }
     }
-    onVisibleChanged: if (visible) { refreshMotion(); if (motionListOpen) refreshMotionAlbums() }
+    onVisibleChanged: if (visible) { refreshMotion(); if (motionListOpen) refreshMotionAlbums(); refreshDupes() }
+    // Repeated songs (same artist, album and title): the app shows only the best copy.
+    property var dupGroups: []
+    property bool dupListOpen: false
+    readonly property int dupHidden: { var n = 0; for (var i = 0; i < dupGroups.length; i++) n += dupGroups[i].copies.length - 1; return n }
+    readonly property real dupBytes: { var b = 0; for (var i = 0; i < dupGroups.length; i++) for (var j = 1; j < dupGroups[i].copies.length; j++) b += dupGroups[i].copies[j].size; return b }
+    readonly property bool dupPicked: { for (var i = 0; i < dupGroups.length; i++) if (dupGroups[i].picked) return true; return false }
+    function refreshDupes() { try { dupGroups = JSON.parse(library.duplicatesJson()) } catch (e) { dupGroups = [] } }
+    function sizeText(b) {
+        return b >= 1073741824 ? (b / 1073741824).toFixed(1).replace(".", ",") + " GB" : Math.max(1, Math.round(b / 1048576)) + " MB"
+    }
+    Connections {
+        target: library
+        function onDuplicatesChanged() { if (dlg.visible) dlg.refreshDupes() }
+        function onLibraryChanged() { if (dlg.visible) dlg.refreshDupes() }
+    }
     // Copying the lyrics in the database to files beside the songs.
     property int lrcDone: 0
     property int lrcTotal: 0
@@ -595,6 +610,43 @@ Item {
                     }
                     Group {
                         visible: dlg.page === "library"
+                        title: "Músicas repetidas"
+                        description: "Quando a mesma música aparece mais de uma vez (mesmo artista, álbum e título, com duração parecida), o app mostra só a cópia de melhor qualidade: sem perdas antes de comprimida, depois mais bits, taxa de amostragem e kbps. Nenhum arquivo é apagado."
+                        SwitchRow {
+                            title: "Mostrar só a melhor cópia"
+                            subtitle: dlg.get("hidedupes") ? "As outras cópias ficam escondidas da biblioteca, da busca e das playlists" : "Desligado, todas as cópias aparecem"
+                            checked: dlg.get("hidedupes")
+                            onToggled: dlg.set("hidedupes", !checked)
+                        }
+                        ButtonRow {
+                            title: dlg.dupGroups.length === 0 ? "Nenhuma música repetida"
+                                 : dlg.dupGroups.length === 1 ? "1 música com mais de uma cópia" : dlg.dupGroups.length + " músicas com mais de uma cópia"
+                            subtitle: dlg.dupGroups.length === 0 ? "Sua biblioteca não tem cópias da mesma música"
+                                : (dlg.dupHidden === 1 ? "1 cópia" : dlg.dupHidden + " cópias") + (dlg.get("hidedupes") ? " escondida" + (dlg.dupHidden === 1 ? "" : "s") : " a mais")
+                                  + ", ocupando " + dlg.sizeText(dlg.dupBytes) + " no disco"
+                            button: dlg.dupListOpen ? "Esconder" : "Ver lista"
+                            enabled: dlg.dupGroups.length > 0
+                            onClicked: dlg.dupListOpen = !dlg.dupListOpen
+                        }
+                        Repeater {
+                            model: dlg.dupListOpen ? dlg.dupGroups : []
+                            delegate: DupRow {
+                                required property var modelData
+                                group: modelData
+                                onOpenAlbum: (id) => dlg.openAlbum(id)
+                                onKeep: (id) => library.keepCopy(id)
+                            }
+                        }
+                        ButtonRow {
+                            visible: dlg.dupPicked
+                            title: "Cópias escolhidas por você"
+                            subtitle: "Voltar a mostrar sempre a cópia de melhor qualidade"
+                            button: "Restaurar"
+                            onClicked: library.forgetKeptCopies()
+                        }
+                    }
+                    Group {
+                        visible: dlg.page === "library"
                         title: "Barra lateral"
                         description: "Esconda o que você não usa. As seções podem ser recolhidas clicando no título."
                         Repeater {
@@ -873,6 +925,103 @@ Item {
         }
         Icon { anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter } name: "go-next"; size: 16; color: Theme.dimFg }
         MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: mr.clicked() }
+    }
+
+    // One repeated song: title, artist · album, then each copy (kept one first)
+    // with its quality and where it is; the others can be shown instead.
+    component DupRow: Rectangle {
+        id: dr
+        property var group: ({ copies: [] })
+        signal openAlbum(int id)
+        signal keep(int id)
+        width: body.width
+        height: dcol.height + 20
+        radius: Theme.fluent ? 4 : 0
+        color: Theme.fluent ? Theme.cardBg : "transparent"
+        border.width: Theme.fluent ? 1 : 0
+        border.color: Theme.border
+        Rectangle {
+            visible: !Theme.fluent
+            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Theme.apple ? 14 : 0 }
+            height: 1; color: Theme.border; opacity: Theme.material ? 0 : 0.7
+        }
+        Column {
+            id: dcol
+            x: 14; y: 10; width: parent.width - 28
+            spacing: 6
+            Column {
+                width: parent.width
+                spacing: 1
+                Text { width: parent.width; text: dr.group.title || ""; color: Theme.fg; elide: Text.ElideRight; font.family: Theme.font; font.pointSize: Theme.fontSize; font.weight: Font.DemiBold }
+                Text {
+                    width: parent.width; elide: Text.ElideRight
+                    text: (dr.group.artist || "") + (dr.group.album ? " · " + dr.group.album : "")
+                    color: albArea.containsMouse ? Theme.accentFg : Theme.dimFg
+                    font.family: Theme.font; font.pointSize: Theme.fontSize - 1.5; font.underline: albArea.containsMouse
+                    MouseArea { id: albArea; anchors.fill: parent; enabled: !!dr.group.albumId; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: dr.openAlbum(dr.group.albumId) }
+                }
+            }
+            Repeater {
+                model: dr.group.copies
+                Item {
+                    id: cp
+                    required property var modelData
+                    required property int index
+                    readonly property bool kept: index === 0
+                    width: dcol.width
+                    height: Math.max(cpText.height, keepBt.visible ? keepBt.height : 0)
+                    Rectangle {
+                        id: mark
+                        anchors { left: parent.left; top: parent.top; topMargin: 2 }
+                        width: 18; height: 18; radius: 9
+                        color: cp.kept ? Theme.accent : "transparent"
+                        border.width: cp.kept ? 0 : 1.5
+                        border.color: Theme.border
+                        Icon { anchors.centerIn: parent; visible: cp.kept; name: "check"; size: 11; color: Theme.accentInk }
+                    }
+                    Column {
+                        id: cpText
+                        anchors { left: mark.right; leftMargin: 10; right: keepBt.visible ? keepBt.left : parent.right; rightMargin: 10 }
+                        spacing: 1
+                        Row {
+                            spacing: 8
+                            Text {
+                                text: cp.modelData.quality || "Formato desconhecido"
+                                color: cp.kept ? Theme.fg : Theme.dimFg
+                                font.family: Theme.font; font.pointSize: Theme.fontSize - 1; font.weight: cp.kept ? Font.DemiBold : Font.Normal
+                            }
+                            Rectangle {
+                                visible: cp.modelData.lossless
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: llText.implicitWidth + 10; height: llText.implicitHeight + 2; radius: height / 2
+                                color: "transparent"; border.width: 1; border.color: Theme.dimFg
+                                Text { id: llText; anchors.centerIn: parent; text: "Sem perdas"; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 3; font.weight: Font.DemiBold }
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: cp.kept ? (dr.group.picked ? "escolhida por você" : "mostrada no app") : dlg.sizeText(cp.modelData.size)
+                                color: cp.kept ? Theme.accentFg : Theme.dimFg
+                                font.family: Theme.font; font.pointSize: Theme.fontSize - 2
+                            }
+                        }
+                        Text {
+                            width: parent.width
+                            text: cp.modelData.path
+                            elide: Text.ElideMiddle
+                            color: Theme.dimFg
+                            font.family: Theme.font; font.pointSize: Theme.fontSize - 2
+                        }
+                    }
+                    FlatButton {
+                        id: keepBt
+                        visible: !cp.kept
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        text: "Mostrar esta"
+                        onClicked: dr.keep(cp.modelData.id)
+                    }
+                }
+            }
+        }
     }
 
     component ButtonRow: RowBase {

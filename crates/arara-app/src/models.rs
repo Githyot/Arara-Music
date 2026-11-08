@@ -145,6 +145,7 @@ impl TrackModelRust {
             "gain": t.track_gain, "albumGain": t.album_gain, "year": t.year, "genre": t.genre,
             "quality": t.quality().0, "qualityDetail": t.quality().1, "explicit": t.explicit,
             "cover": self.cover(&t.cover_hash, 256), "coverBig": self.cover(&t.cover_hash, 640),
+            "trackNo": t.track_no, "discNo": t.disc_no,
         })
     }
 }

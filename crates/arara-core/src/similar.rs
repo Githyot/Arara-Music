@@ -115,7 +115,7 @@ pub fn matches(db: &Db, tag: &str, exclude_artist: Option<i64>, track_limit: usi
     }
     let mut st = db.conn.prepare(
         "SELECT t.id, t.genre, t.album_id, a.artist_id, t.play_count, t.starred
-         FROM tracks t LEFT JOIN albums a ON a.id = t.album_id",
+         FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE t.dup_of IS NULL",
     )?;
     let rows: Vec<Row> = st
         .query_map([], |r| {

@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod covers;
 pub mod explicit;
 pub mod db;
+pub mod dupes;
 pub mod edit;
 pub mod import;
 pub mod info;
