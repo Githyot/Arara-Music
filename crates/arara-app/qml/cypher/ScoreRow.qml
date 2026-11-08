@@ -185,7 +185,7 @@ Canvas {
                     var tw = ctx.measureText(label).width
                     ctx.fillStyle = Theme.card
                     ctx.fillRect(cx - tw / 2 - 2, tyy - 6, tw + 4, 12)
-                    ctx.fillStyle = sIdx === shape.root && ev.code === "B" ? chordColor : ink
+                    ctx.fillStyle = sIdx === shape.root && Examples.plain(ev.code) === "B" ? chordColor : ink
                     ctx.fillText(label, cx - tw / 2, tyy + 4)
                 }
 
@@ -226,7 +226,7 @@ Canvas {
                         ctx.moveTo(nx - 3.5, y + 3); ctx.lineTo(nx + 3.5, y - 3)
                         ctx.stroke()
                     } else {
-                        ctx.fillStyle = ev.code === "B" ? chordColor : accent
+                        ctx.fillStyle = Examples.plain(ev.code) === "B" ? chordColor : accent
                         ctx.save()
                         ctx.translate(nx, y); ctx.rotate(-0.35); ctx.scale(1.35, 1)
                         ctx.beginPath(); ctx.arc(0, 0, gap / 2 - 0.3, 0, Math.PI * 2); ctx.fill()

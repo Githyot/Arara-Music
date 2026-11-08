@@ -155,7 +155,7 @@ Canvas {
                     ctx.moveTo(nx - 3.5, y + 3); ctx.lineTo(nx + 3.5, y - 3)
                     ctx.stroke()
                 } else {
-                    ctx.fillStyle = n === 0 && i < pattern.length && pattern[i] === "B" ? Theme.chord : accent
+                    ctx.fillStyle = n === 0 && i < pattern.length && Examples.plain(pattern[i]) === "B" ? Theme.chord : accent
                     ctx.save()
                     ctx.translate(nx, y)
                     ctx.rotate(-0.35)

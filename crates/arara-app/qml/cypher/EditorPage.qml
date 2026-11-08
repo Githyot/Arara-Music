@@ -514,7 +514,7 @@ Rectangle {
                             }
                             Text {
                                 width: parent.width
-                                text: "Toque em cada tempo para trocar: · pausa, baixo, tudo, acorde (sem o baixo), agudas (para cima), abafado para baixo (↓×) e para cima (↑×)."
+                                text: "Toque em cada tempo para trocar: · pausa, baixo, tudo, acorde (sem o baixo), agudas (para cima), abafado para baixo (↓×) e para cima (↑×). O “>” no canto (ou clique direito) marca a palhetada forte (⬇ ⬆)."
                                 wrapMode: Text.WordWrap
                                 color: Theme.textDim
                                 font.family: Theme.fontFamily

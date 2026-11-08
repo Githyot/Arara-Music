@@ -23,17 +23,31 @@ QtObject {
     // "B" baixo, "D" tudo, "d" acorde sem o baixo, "U" agudas para cima,
     // "X" abafado para baixo, "XU" abafado para cima, "" pausa e, para dedilhado, "P" + cordas ("P03" = cordas 0
     // e 3 para baixo, "P5U" = corda 5 para cima). Corda 0 = Mi grave.
-    function isPick(code) { return code && code.charAt(0) === "P" }
-    function isMute(code) { return code === "X" || code === "XU" }
+    // Palhetada forte (acento): o mesmo golpe com ">" no fim ("D>", "U>", "B>").
+    function isAccent(code) { return !!code && code.charAt(code.length - 1) === ">" }
+    function plain(code) { return isAccent(code) ? code.substring(0, code.length - 1) : (code || "") }
+    function withAccent(code, on) { var p = plain(code); return p === "" ? "" : on ? p + ">" : p }
+    function isPick(code) { code = plain(code); return code && code.charAt(0) === "P" }
+    function isMute(code) { code = plain(code); return code === "X" || code === "XU" }
     function strokeUp(code) {
+        code = plain(code)
         return code === "U" || code === "XU" || (isPick(code) && code.charAt(code.length - 1) === "U")
     }
+    // Forte: seta dupla (⇓ ⇑), mais grossa, para ler de longe.
     function strokeArrow(code) {
-        return code === "" ? "·" : isMute(code) ? (code === "XU" ? "↑×" : "↓×") : strokeUp(code) ? "↑" : "↓"
+        var a = isAccent(code)
+        code = plain(code)
+        if (code === "") return "·"
+        var up = strokeUp(code)
+        var arrow = a ? (up ? "⬆" : "⬇") : (up ? "↑" : "↓")
+        return isMute(code) ? arrow + "×" : arrow
     }
     function strokeLabel(code) {
-        if (isPick(code)) return "corda " + pickStrings(code).map(function (s) { return ["E", "A", "D", "G", "B", "e"][s] }).join("+")
-        return ({ "": "·", "B": "baixo", "D": "tudo", "d": "acorde", "U": "agudas", "X": "abafa ↓", "XU": "abafa ↑" })[code] || code
+        var a = isAccent(code)
+        code = plain(code)
+        var l = isPick(code) ? "corda " + pickStrings(code).map(function (s) { return ["E", "A", "D", "G", "B", "e"][s] }).join("+")
+              : ({ "": "·", "B": "baixo", "D": "tudo", "d": "acorde", "U": "agudas", "X": "abafa ↓", "XU": "abafa ↑" })[code] || code
+        return a ? l + " forte" : l
     }
     function pickStrings(code) {
         var out = []
@@ -50,6 +64,7 @@ QtObject {
     // Cordas que soam num tempo, para uma forma { frets, root }.
     function strokeStrings(shape, code) {
         if (!shape) return []
+        code = plain(code)
         if (isPick(code)) return pickStrings(code).filter(function (s) { return shape.frets[s] >= 0 })
         var played = []
         for (var s = 0; s < 6; ++s) if (shape.frets[s] >= 0) played.push(s)

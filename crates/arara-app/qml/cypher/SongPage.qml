@@ -386,20 +386,20 @@ Rectangle {
             title: page.song ? page.song.title : ""
             AppButton {
                 text: page.song && page.song.id ? "Editar" : "Editar uma cópia"
-                flat: true
+                flat: false
                 onClicked: page.edit()
             }
             AppButton {
                 text: page.playAlong ? "■ Tocar junto" : "Tocar junto"
-                flat: true
+                flat: false
                 onClicked: page.playAlong = !page.playAlong
             }
             AppButton {
                 text: page.scrolling ? "Parar" : "Rolar"
-                flat: true
+                flat: false
                 onClicked: page.scrolling = !page.scrolling
             }
-            AppButton { text: "Voltar"; flat: true; onClicked: page.back() }
+            AppButton { text: "Voltar"; flat: false; onClicked: page.back() }
         }
 
         // Barra do Tocar junto: acorde da vez, os próximos e o que o microfone ouve.
@@ -720,7 +720,7 @@ Rectangle {
                                             Text {
                                                 width: parent.width
                                                 horizontalAlignment: Text.AlignHCenter
-                                                text: ({ "B": "baixo", "D": "tudo", "d": "acorde", "U": "agudas", "X": "abafa ↓", "XU": "abafa ↑" })[beat.modelData] || " "
+                                                text: (beat.modelData ? Examples.strokeLabel(beat.modelData) : " ")
                                                 color: Theme.text
                                                 font.family: Theme.fontFamily
                                                 font.pixelSize: 10

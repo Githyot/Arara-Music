@@ -19,7 +19,11 @@ Rectangle {
         color: Theme.dark ? Qt.rgba(0, 0, 0, 0.36) : Qt.rgba(0, 0, 0, 0.12)
     }
 
+    // Título: centralizado no GNOME quando cabe; senão encosta à esquerda e
+    // corta com "…" antes dos botões, sem nunca ficar por baixo deles.
     Text {
+        id: titleText
+        readonly property real room: actionRow.x - 12 - Theme.pagePadding
         text: root.title
         color: Theme.text
         font.family: Theme.fontFamily
@@ -28,8 +32,9 @@ Rectangle {
         elide: Text.ElideRight
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: Theme.apple ? 6 : 0
-        x: Theme.apple ? Theme.pagePadding : (parent.width - width) / 2
-        width: Math.min(implicitWidth, parent.width - actionRow.width - 2 * Theme.pagePadding)
+        width: Math.max(0, Math.min(implicitWidth, room))
+        x: Theme.apple ? Theme.pagePadding
+                       : Math.max(Theme.pagePadding, Math.min((parent.width - width) / 2, actionRow.x - 12 - width))
     }
 
     Row {

@@ -271,9 +271,16 @@ Canvas {
                 if (ev.arrow) {
                     ctx.fillStyle = accent
                     ctx.font = "bold 15px sans-serif"
-                    var ar = ev.arrow === "U" || ev.arrow === "XU" ? "↑" : "↓"
+                    var strongA = Examples.isAccent(ev.arrow), baseA = Examples.plain(ev.arrow)
+                    var ar = baseA === "U" || baseA === "XU" ? (strongA ? "⬆" : "↑") : (strongA ? "⬇" : "↓")
+                    if (strongA) ctx.font = "900 19px sans-serif"
                     ctx.fillText(ar, cx - ctx.measureText(ar).width / 2, tabBottom + 22)
-                    if (ev.arrow === "X" || ev.arrow === "XU") {
+                    if (strongA) {
+                        // Acento ">" em cima da tab, como na partitura.
+                        ctx.font = "bold 12px sans-serif"
+                        ctx.fillText(">", cx - ctx.measureText(">").width / 2, tabTop - 6)
+                    }
+                    if (baseA === "X" || baseA === "XU") {
                         // Batida abafada: × junto da seta.
                         ctx.fillStyle = Theme.destructive
                         ctx.font = "bold 13px sans-serif"
@@ -388,7 +395,7 @@ Canvas {
             for (var i = 0; i < row.length; ++i) {
                 var w = row[i].bar ? root.barW : root.slotW
                 if (lx >= x && lx < x + w && !row[i].bar) {
-                    var order = ["", "D", "U", "X", "XU"]
+                    var order = ["", "D", "U", "D>", "U>", "X", "XU"]
                     var next = order[(order.indexOf(row[i].arrow) + 1) % order.length]
                     root.arrowClicked(row[i].s, row[i].e, next)
                     return

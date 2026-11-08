@@ -196,7 +196,7 @@ Column {
     }
     function cycleArrow(si, ei) {
         var e = model[si].events[ei]
-        var order = ["", "D", "U", "X", "XU"]
+        var order = ["", "D", "U", "D>", "U>", "X", "XU"]
         e.arrow = order[(order.indexOf(e.arrow) + 1) % order.length]
         commit()
     }
@@ -522,6 +522,7 @@ Column {
             }
             Repeater {
                 model: [{ code: "", label: "nenhuma" }, { code: "D", label: "↓" }, { code: "U", label: "↑" },
+                        { code: "D>", label: "⬇ forte" }, { code: "U>", label: "⬆ forte" },
                         { code: "X", label: "↓× abafada" }, { code: "XU", label: "↑× abafada" }]
                 AppButton {
                     required property var modelData

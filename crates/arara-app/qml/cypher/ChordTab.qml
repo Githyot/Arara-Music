@@ -130,7 +130,8 @@ Column {
     function cycleStroke(index, step) {
         var pat = ownPattern(index)
         if (!pat) return
-        var code = pat[step]
+        var strong = Examples.isAccent(pat[step])
+        var code = Examples.plain(pat[step])
         if (Examples.isPick(code)) {
             // Dedilhado: a seta só vira (para baixo / para cima).
             var st = Examples.pickStrings(code)
@@ -140,6 +141,7 @@ Column {
             var i = strokeCodes.indexOf(code)
             pat[step] = strokeCodes[(i + 1) % strokeCodes.length]
         }
+        pat[step] = Examples.withAccent(pat[step], strong)
         changed()
     }
     function baseShape(token) {

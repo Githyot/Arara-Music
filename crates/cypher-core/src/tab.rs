@@ -226,10 +226,13 @@ pub struct LessonEvent {
 }
 
 /// Caractere da seta na linha de setas da tab: ↓ ↑, e ⇓ ⇑ para a batida
-/// abafada (no app aparecem como ↓× e ↑×).
+/// abafada (no app aparecem como ↓× e ↑×) e ⬇ ⬆ para a palhetada forte
+/// (acento, código com ">" no fim: "D>", "U>").
 fn arrow_char(arrow: &str) -> char {
     match arrow {
         "U" => '↑',
+        "U>" | "XU>" => '⬆',
+        "D>" | "X>" => '⬇',
         "X" => '⇓',
         "XU" => '⇑',
         _ => '↓',
@@ -692,6 +695,8 @@ fn lesson_block(block: &[&str]) -> Option<System> {
                 '↑' | '⇡' => "U",
                 '⇓' => "X",
                 '⇑' => "XU",
+                '⬇' => "D>",
+                '⬆' => "U>",
                 _ => continue,
             };
             if let Some(col) = body_col(i) {
@@ -744,6 +749,15 @@ E|-----------------------|";
             frets(&ev),
             ["1:8", "1:8", "2:6", "3:8", "3:6", "3:5", "2:8", "2:/10"]
         );
+    }
+
+    #[test]
+    fn accented_arrows_round_trip() {
+        let text = "e|-0-0-|\nB|-1-1-|\n  ⬇ ↑";
+        let sys = &edit_model(text)[0];
+        assert_eq!(sys.events[0].arrow, "D>");
+        assert_eq!(sys.events[1].arrow, "U");
+        assert!(set_arrow(text, 0, 1, "U>").contains('⬆'));
     }
 
     #[test]

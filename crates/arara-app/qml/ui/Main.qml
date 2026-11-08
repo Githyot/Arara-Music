@@ -26,7 +26,7 @@ Window {
     readonly property bool wide: width >= 1000
     property bool panelOpen: true
     // The lyrics screen and the study mode (Estudar) have their own controls and use the full width.
-    readonly property bool panelDocked: !lyricsMode && !practicing
+    readonly property bool panelDocked: !lyricsMode && !practicing && !(nav.page === "studies" && prefs.hidestudypanel)
     property bool lyricsMode: false
     // ---------- preferences ----------
     // Every setting lives here, typed; stored as "pref:<key>" strings
@@ -41,7 +41,8 @@ Window {
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true, xflatency: 160,
         hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
-        edittags: true, hidedupes: true
+        edittags: true, hidedupes: true,
+        hidestudypanel: false   // aba Estudos sem o player do lado
     })
     property var prefs: prefDefaults
     function loadPrefs() {
@@ -1043,6 +1044,13 @@ Window {
                             }
                             Text { anchors.verticalCenter: parent.verticalCenter; visible: !search.text; text: "Pesquisar na biblioteca"; color: Theme.dimFg; font: search.font }
                         }
+                    },
+                    // Aba Estudos: esconder ou mostrar o player do lado (fica lembrado).
+                    FlatButton {
+                        visible: nav.page === "studies"
+                        icon: "sidebar"; checked: !win.prefs.hidestudypanel
+                        tip: win.prefs.hidestudypanel ? "Mostrar o player" : "Esconder o player"
+                        onClicked: win.setPref("hidestudypanel", !win.prefs.hidestudypanel)
                     },
                     FlatButton { id: menuButton; icon: "menu"; onClicked: appMenu.openUnder(menuButton) }
                 ]
