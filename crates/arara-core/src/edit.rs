@@ -375,6 +375,8 @@ pub fn apply(
     tx.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)", [])?;
     // Songs that moved between albums change the votes of both.
     crate::db::pick_album_covers(&tx)?;
+    // An edited title or album can make (or undo) a repeated song.
+    crate::dupes::mark(&tx)?;
     tx.commit()?;
     Ok(out)
 }

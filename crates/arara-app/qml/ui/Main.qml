@@ -39,7 +39,7 @@ Window {
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true, xflatency: 160,
         hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
-        edittags: true
+        edittags: true, hidedupes: true
     })
     property var prefs: prefDefaults
     function loadPrefs() {
@@ -1528,7 +1528,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.32",
+        onAbout: prompt.info("Arara Music 0.7.35",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     // Decodes the animated covers once for every place that shows them.

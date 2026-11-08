@@ -438,6 +438,7 @@ pub fn scan(
         })?;
         if stats.parsed > 0 || stats.removed > 0 {
             stats.covers_written = crate::db::pick_album_covers(&txn)?;
+            crate::dupes::mark(&txn)?;
         }
         txn.commit()?;
         Ok(())

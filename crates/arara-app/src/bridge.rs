@@ -458,6 +458,27 @@ pub mod qobject {
         #[cxx_name = "motionAlbumsJson"]
         fn motion_albums_json(self: &Library) -> QString;
 
+        /// Songs with more than one copy: [{title, artist, album, albumId, picked,
+        /// copies: [{id, path, quality, lossless, remote, size}]}], kept copy first.
+        #[qinvokable]
+        #[cxx_name = "duplicatesJson"]
+        fn duplicates_json(self: &Library) -> QString;
+
+        /// Show this copy of a repeated song instead of the best-quality one.
+        #[qinvokable]
+        #[cxx_name = "keepCopy"]
+        fn keep_copy(self: Pin<&mut Library>, track_id: i64);
+
+        /// Back to keeping the best copy of every repeated song.
+        #[qinvokable]
+        #[cxx_name = "forgetKeptCopies"]
+        fn forget_kept_copies(self: Pin<&mut Library>);
+
+        /// The library's copies changed (preference, hand-picked copy).
+        #[qsignal]
+        #[cxx_name = "duplicatesChanged"]
+        fn duplicates_changed(self: Pin<&mut Library>);
+
         /// {"files": n, "bytes": n} of the animated cover cache.
         #[qinvokable]
         #[cxx_name = "motionCacheJson"]
@@ -1452,7 +1473,7 @@ impl qobject::Library {
         let stats = db.conn.query_row(
             "SELECT COUNT(*), COALESCE(SUM(duration_ms),0), COALESCE(SUM(play_count),0), MIN(added_at), MAX(last_played),
                     COUNT(DISTINCT COALESCE(disc_no,1)), GROUP_CONCAT(DISTINCT composer)
-             FROM tracks WHERE album_id = ?1",
+             FROM tracks WHERE album_id = ?1 AND dup_of IS NULL",
             [album_id],
             |r| Ok(json!({
                 "tracks": r.get::<_, i64>(0)?, "durationMs": r.get::<_, i64>(1)?, "plays": r.get::<_, i64>(2)?,
@@ -1495,7 +1516,7 @@ impl qobject::Library {
         let name: String = db.conn.query_row("SELECT name FROM artists WHERE id = ?1", [artist_id], |r| r.get(0)).unwrap_or_default();
         // Songs credited to the artist: on their albums, or as track artist ("feat." included).
         let like = format!("%{}%", name.replace('%', "").replace('_', ""));
-        let cond = "(a.artist_id = ?1 OR t.artist = ?2 COLLATE NOCASE OR t.artist LIKE ?3)";
+        let cond = "t.dup_of IS NULL AND (a.artist_id = ?1 OR t.artist = ?2 COLLATE NOCASE OR t.artist LIKE ?3)";
         let stats = db.conn.query_row(
             &format!("SELECT COUNT(*), COALESCE(SUM(t.duration_ms),0), COALESCE(SUM(t.play_count),0), MIN(COALESCE(t.year,a.year)), MAX(COALESCE(t.year,a.year)),
                     MAX(t.last_played), SUM(t.starred)
@@ -1785,6 +1806,49 @@ impl qobject::Library {
     pub fn clear_motion_covers(self: Pin<&mut Self>) -> i32 {
         let Some(db) = self.db.as_ref() else { return 0 };
         arara_core::motion::clear(db, &self.motion_dir()) as i32
+    }
+
+    pub fn duplicates_json(&self) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let groups = arara_core::dupes::find_groups(&db.conn).unwrap_or_default();
+        let servers: std::collections::HashMap<i64, String> =
+            remote::servers(db).unwrap_or_default().into_iter().map(|s| (s.id, s.name)).collect();
+        let place = |p: &str| match remote::parse_path(p) {
+            Some((id, _)) => format!("Servidor {}", servers.get(&id).cloned().unwrap_or_default()),
+            None => match std::env::var("HOME") {
+                Ok(h) if !h.is_empty() && p.starts_with(&format!("{h}/")) => format!("~{}", &p[h.len()..]),
+                _ => p.to_string(),
+            },
+        };
+        let v: Vec<_> = groups
+            .iter()
+            .map(|g| {
+                let copies: Vec<_> = g
+                    .copies
+                    .iter()
+                    .map(|c| json!({
+                        "id": c.id, "path": place(&c.path), "quality": c.quality(),
+                        "lossless": c.lossless(), "remote": c.is_remote(), "size": c.size,
+                    }))
+                    .collect();
+                json!({ "title": g.title, "artist": g.artist, "album": g.album, "albumId": g.album_id, "picked": g.picked, "copies": copies })
+            })
+            .collect();
+        qs(&serde_json::to_string(&v).unwrap())
+    }
+
+    pub fn keep_copy(self: Pin<&mut Self>, track_id: i64) {
+        self.db_job(move |db| db.keep_copy(track_id), |mut o| {
+            o.as_mut().library_changed();
+            o.as_mut().duplicates_changed();
+        });
+    }
+
+    pub fn forget_kept_copies(self: Pin<&mut Self>) {
+        self.db_job(|db| db.forget_kept_copies(), |mut o| {
+            o.as_mut().library_changed();
+            o.as_mut().duplicates_changed();
+        });
     }
 
     pub fn motion_albums_json(&self) -> QString {
@@ -2206,6 +2270,12 @@ impl qobject::Library {
     pub fn set_setting(&self, key: &QString, value: &QString) {
         if let Some(d) = &self.db {
             let _ = d.set_kv(&format!("pref:{key}"), &value.to_string());
+        }
+        if key.to_string() == "hidedupes" {
+            self.db_job(|db| db.mark_duplicates().map(|_| ()), |mut o| {
+                o.as_mut().library_changed();
+                o.as_mut().duplicates_changed();
+            });
         }
         // Turning info lookups (back) on starts the background run.
         if matches!(key.to_string().as_str(), "onlineinfo" | "infoprefetch" | "infofiles") && value.to_string() == "1" {
