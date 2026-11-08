@@ -37,7 +37,7 @@ Window {
         explicit: true, explicitlyrics: true, rate: 1.0, onlineinfo: true, listening: true, motioncovers: false,
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
-        xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
+        xfmanual: true, xfpause: true, xfbeat: false, xfloud: true, xflatency: 160,
         hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
         edittags: true
     })
@@ -492,7 +492,9 @@ Window {
             var trim = trimOn()
             var endA = trim && A ? A.outro_ms : durA
             var startB = trim && B && B.intro_ms > 300 ? B.intro_ms : 0
-            var lead = 60   // GStreamer needs a moment to start the preloaded song
+            // GStreamer takes a moment (~0.1 s, measured) before a started song is heard:
+            // gapless switches start that much early, beat-aligned mixes skip that much in.
+            var lead = Math.max(0, Number(win.prefs.xflatency))
             if (mode === "gapless" || sameAlbum(a, b)) {
                 // Albums that flow into the next track (live, concept albums) stay intact.
                 if (sameAlbum(a, b)) { endA = durA; startB = 0 }
@@ -500,7 +502,7 @@ Window {
             }
             var user = win.prefs.xfdur * 1000
             var cap = Math.max(1000, Math.min(durA, durB || durA) / 3)
-            var d = Math.min(user, cap), at = endA - d
+            var d = Math.min(user, cap), at = endA - d, aligned = false
             if (mode === "smart" && A && B) {
                 // MixRamp: the next song reaches full level just as this one drops below it.
                 var head = Math.max(0, B.ramp_in_ms - startB)
@@ -517,11 +519,13 @@ Window {
                     if (close) {
                         at = beatAt(A, at, false)
                         startB = Math.max(startB, B.beat_ms)
+                        aligned = true
                     }
                 }
                 d = endA - at
             }
-            return { at: at, start: startB, dur: d, cut: true }
+            if (aligned) startB += lead
+            return { at: at, start: startB, dur: d, cut: true, beat: aligned }
         }
         property real nextAt: -1     // position where the next transition starts
         function tick() {
@@ -1445,7 +1449,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.13",
+        onAbout: prompt.info("Arara Music 0.7.23",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     PreferencesDialog {
