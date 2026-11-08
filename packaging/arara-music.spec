@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.29
+Version:        0.7.30
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -45,10 +45,19 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.30-1
+- Versão única com a 0.7.28 (trecho preferido) e a 0.7.29 (letras da
+  palavra crescendo aos poucos no karaokê).
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.29-1
 - Karaokê: as letras da palavra sobem e crescem uma a uma junto com o
   preenchimento, e a palavra só fica toda erguida quando termina de ser
   cantada (antes ela subia inteira logo no começo).
+
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.28-1
+- Trecho preferido: na tela da letra, marque onde o trecho começa e
+  termina (tocando nas linhas da letra ou na posição atual). Um botão ao
+  lado da estrela toca só esse trecho, na tela da letra e no painel.
 
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.27-1
 - Versão única com a 0.7.23 (mixagem inteligente), a 0.7.24 (letras ao
