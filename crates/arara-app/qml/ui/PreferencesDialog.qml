@@ -321,7 +321,7 @@ Item {
                         ChoiceRow {
                             title: "Curva"
                             subtitle: ({ equal: "Potência constante: o volume não afunda no meio", linear: "Volume muda em linha reta (afunda um pouco no meio)",
-                                         scurve: "Começa e termina devagar, troca rápido no meio", exp: "A atual some logo, a próxima entra no fim, estilo DJ" })[dlg.get("xfcurve")] || ""
+                                         scurve: "Começa e termina devagar, troca rápido no meio", exp: "Troca rápida no meio, como um corte de DJ, sem buraco no volume" })[dlg.get("xfcurve")] || ""
                             options: [{ v: "equal", t: "Suave" }, { v: "linear", t: "Linear" }, { v: "scurve", t: "Curva S" }, { v: "exp", t: "DJ" }]
                             value: dlg.get("xfcurve")
                             onPicked: (v) => dlg.set("xfcurve", v)
@@ -362,6 +362,15 @@ Item {
                             subtitle: "Abaixa o som por um instante em vez de cortar de uma vez"
                             checked: dlg.get("xfpause")
                             onToggled: dlg.set("xfpause", !checked)
+                        }
+                        SliderRow {
+                            enabled: dlg.get("xfmode") === "gapless" || (dlg.get("xfmode") === "smart" && dlg.get("xfbeat")) || dlg.get("xfalbum")
+                            title: "Atraso para começar a próxima"
+                            subtitle: "O tempo que o sistema leva para soltar o som de uma música que começou. Se as batidas ficarem desencontradas ou sobrar um silêncio sem intervalo, ajuste aqui"
+                            from: 0; to: 300; step: 10
+                            value: dlg.get("xflatency")
+                            label: Math.round(value) + " ms"
+                            onMoved: (v) => dlg.set("xflatency", v)
                         }
                     }
                     Group {
@@ -731,7 +740,7 @@ Item {
                 switch (curve) {
                 case "linear": return [1 - p, p]
                 case "scurve": { var s = p * p * (3 - 2 * p); return [1 - s, s] }
-                case "exp": return [Math.pow(1 - p, 3), Math.pow(p, 0.5) * p]
+                case "exp": { var q = Math.max(0, Math.min(1, (p - 0.3) / 0.4)); q = q * q * (3 - 2 * q); return [Math.cos(q * Math.PI / 2), Math.sin(q * Math.PI / 2)] }
                 default: return [Math.cos(p * Math.PI / 2), Math.sin(p * Math.PI / 2)]
                 }
             }
