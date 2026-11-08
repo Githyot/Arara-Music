@@ -125,6 +125,7 @@ Item {
 
             TextMetrics { id: tm; font: probe.font; text: lineItem.modelData.text || "♪" }
             Text { id: probe; visible: false; font.family: Theme.font; font.pointSize: view.activeSize; font.weight: Font.Bold }
+            FontMetrics { id: fm; font.family: probe.font.family; font.pointSize: probe.font.pointSize; font.weight: probe.font.weight }
             // Width of one space (measured between letters: a lone space measures 0).
             TextMetrics { id: pairTm; font: probe.font; text: "n n" }
             TextMetrics { id: nnTm; font: probe.font; text: "nn" }
@@ -147,12 +148,25 @@ Item {
                         required property var modelData
                         readonly property real p: !lineItem.active ? (lineItem.past ? 1 : 0)
                             : Math.max(0, Math.min(1, (view.at - modelData[0]) / Math.max(1, modelData[1] - modelData[0])))
-                        // Apple-Music-like: as a word is sung it rises a little and
-                        // grows a touch; held (long) words swell a bit more while held.
-                        readonly property real ease: 1 - Math.pow(1 - p, 3)
+                        // Apple-Music-like: as a word is sung its letters rise and grow
+                        // one after another, following the fill, so the word is only
+                        // fully raised when it ends. Held (long) words also swell a bit
+                        // as a whole while held.
                         readonly property bool held: modelData[1] - modelData[0] > 900
                         readonly property string txt: String(modelData[2]).replace(/\s+$/, "")
                         readonly property bool spaced: txt.length < String(modelData[2]).length
+                        // Letters (by code point) and where each starts, measured on the
+                        // prefix so kerning stays as in the whole word.
+                        readonly property var chars: Array.from(txt)
+                        readonly property var xs: {
+                            // advanceWidth() is a call, so name the font here to remeasure
+                            // when the size changes (lyrics screen, zoom, theme).
+                            var out = [], pre = "", f = fm.font.pointSize + fm.font.weight + fm.font.family
+                            for (var i = 0; i < chars.length; i++) { out.push(fm.advanceWidth(pre)); pre += chars[i] }
+                            return out
+                        }
+                        // Letters animate only on the sung line (and while it settles back).
+                        readonly property bool lettered: lineItem.active || lineItem.live > 0.01
                         // The trailing space sits outside the part that grows, so
                         // neighbouring words never touch while they swell.
                         // Room for the growth is reserved up front (constant per word),
@@ -164,21 +178,45 @@ Item {
                             x: word.room / 2
                             width: base.implicitWidth; height: base.implicitHeight
                             transformOrigin: Item.Bottom
-                            scale: 1 + lineItem.live * (0.04 * word.ease + (word.held ? 0.06 * Math.sin(Math.PI * word.p) : 0))
-                            transform: Translate { y: -glyphs.height * 0.065 * lineItem.live * word.ease }
+                            scale: 1 + lineItem.live * (word.held ? 0.06 * Math.sin(Math.PI * word.p) : 0)
                             Text {
                                 id: base
+                                visible: !word.lettered
                                 text: word.txt
-                                color: lineItem.active ? view.ink : view.dim
-                                opacity: lineItem.active ? 0.4 : 1
+                                color: view.dim
                                 font: probe.font
                             }
-                            // The sung part: same text, clipped to progress, fully bright.
-                            Item {
-                                visible: lineItem.active || lineItem.live > 0.01
-                                width: base.width * word.p; height: base.height; clip: true
-                                opacity: lineItem.live
-                                Text { text: word.txt; color: view.onDark ? "white" : Theme.accentFg; font: probe.font }
+                            Repeater {
+                                model: word.lettered ? word.chars.length : 0
+                                Item {
+                                    id: letter
+                                    required property int index
+                                    readonly property int n: word.chars.length
+                                    // Fill of this letter: the word's progress swept across its letters.
+                                    readonly property real f: Math.max(0, Math.min(1, word.p * n - index))
+                                    // Rise/grow starts as the fill reaches the letter and spreads
+                                    // over ~2 letters, so the motion flows instead of ticking.
+                                    readonly property real g: Math.max(0, Math.min(1, (word.p * (n + 1.5) - index) / 1.5))
+                                    readonly property real ease: 1 - Math.pow(1 - g, 3)
+                                    x: word.xs[index]
+                                    width: ch.implicitWidth; height: ch.implicitHeight
+                                    transformOrigin: Item.Bottom
+                                    scale: 1 + lineItem.live * 0.06 * ease
+                                    transform: Translate { y: -letter.height * 0.07 * lineItem.live * letter.ease }
+                                    Text {
+                                        id: ch
+                                        text: word.chars[letter.index]
+                                        color: lineItem.active ? view.ink : view.dim
+                                        opacity: lineItem.active ? 0.4 : 1
+                                        font: probe.font
+                                    }
+                                    // The sung part: same letter, clipped to progress, fully bright.
+                                    Item {
+                                        width: ch.width * letter.f; height: ch.height; clip: true
+                                        opacity: lineItem.live
+                                        Text { text: ch.text; color: view.onDark ? "white" : Theme.accentFg; font: probe.font }
+                                    }
+                                }
                             }
                         }
                     }
