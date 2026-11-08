@@ -2,6 +2,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod bridge;
+mod cypher;
 #[cfg(not(windows))]
 mod desktop;
 #[cfg(windows)]
@@ -11,6 +12,11 @@ mod models;
 mod watchdog;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+
+extern "C" {
+    /// cpp/cypher/register.cpp: microfone do Arara Cypher para o QML.
+    fn arara_cypher_register_types();
+}
 
 fn main() {
     env_logger::init();
@@ -30,6 +36,7 @@ fn main() {
         app.as_mut().set_application_name(&QString::from("Arara Music"));
         app.as_mut().set_organization_domain(&QString::from("io.github.githyot"));
     }
+    unsafe { arara_cypher_register_types() };
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         // Qt < 6.5 doesn't search qrc:/qt/qml by default.

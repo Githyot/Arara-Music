@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import AraraStyle
+import io.github.arara
 
 // Popover menu for a track (GtkPopoverMenu look). Quick actions on top
 // (favorite, share), then queue, playlists, station, navigation, info,
@@ -28,6 +29,9 @@ Popup {
     signal editLyrics(var track)
     signal showInFolder(var track)
     signal toggleExplicit(var track, bool shown)
+    signal study(var track)
+    // Tem cifra do Arara Cypher para esta música? (lido ao abrir o menu)
+    property bool hasSheet: false
     // Is the E badge showing for this track right now?
     readonly property bool explicitShown: {
         if (!track) return false
@@ -52,6 +56,7 @@ Popup {
     }
     function openAt(t, x, y, lists) {
         track = t; playlists = lists; showPlaylists = false
+        hasSheet = !!t && !t.free && CypherLibrary.hasSheet(t.title || "", t.artist || "")
         open(); place(x, y)
     }
 
@@ -137,6 +142,13 @@ Popup {
             Item_ { icon: "playlist"; label: "Adicionar à playlist"; submenu: true; onTriggered: menu.showPlaylists = true }
             Sep {}
             Item_ { icon: "station"; label: "Criar estação"; sub: "Músicas parecidas, sem parar"; onTriggered: { menu.startStation(menu.track); menu.close() } }
+            Item_ {
+                visible: !!menu.track && !menu.track.free
+                icon: "study"
+                label: menu.hasSheet ? "Estudar" : "Escrever cifra…"
+                sub: menu.hasSheet ? "Cifra, letra e loop" : "Abre o editor do Arara Cypher"
+                onTriggered: { menu.study(menu.track); menu.close() }
+            }
             Sep {}
             Item_ {
                 icon: "albums"; label: "Ir para o álbum"; sub: menu.track && menu.track.album ? menu.track.album : ""

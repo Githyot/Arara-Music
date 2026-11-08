@@ -35,6 +35,9 @@ Item {
     // is playing right now.
     property var excerpt: null
     property bool excerptPlaying: false
+    // Tem cifra no Arara Cypher: botão Estudar ao lado do trecho preferido.
+    property bool hasSheet: false
+    signal study()
     signal excerptSet(var track, real s, real e)
     signal excerptCleared(var track)
     signal playExcerpt()
@@ -184,6 +187,13 @@ Item {
                     tip: ls.excerpt ? (ls.excerptPlaying ? "Parar o trecho preferido" : "Tocar o trecho preferido (" + ls.fmt(ls.excerpt.s) + " – " + ls.fmt(ls.excerpt.e) + ")") : ""
                     color: ls.excerptPlaying ? Qt.rgba(1, 1, 1, hovered ? 0.4 : 0.32) : hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(1, 1, 1, 0.1)
                     onClicked: ls.playExcerpt()
+                }
+                FlatButton {
+                    visible: ls.hasSheet
+                    icon: "study"; circular: true; iconColor: "white"
+                    tip: "Estudar: cifra, letra e loop"
+                    color: hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(1, 1, 1, 0.1)
+                    onClicked: ls.study()
                 }
                 FlatButton {
                     id: plBtn

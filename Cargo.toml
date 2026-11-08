@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/arara-core", "crates/arara-cli", "crates/arara-app"]
+members = ["crates/arara-core", "crates/arara-cli", "crates/arara-app", "crates/cypher-core"]
 
 [workspace.package]
-version = "0.7.35"
+version = "0.7.37"
 edition = "2021"
 license = "GPL-3.0-or-later"
 

@@ -24,6 +24,7 @@ Player de música para Linux em **Rust + Qt/QML**, com visual inspirado no GNOME
 - Informações de todos os artistas e álbuns (MusicBrainz e Wikipédia) buscadas em segundo plano e salvas junto com as músicas (`.arara-album.json`, `.arara-artist.json`), então as páginas abrem já carregadas e nada se perde se o banco do app for apagado
 - Selo **E** de explícito, como no Apple Music: vem das tags do arquivo, do Navidrome/Jellyfin ou da letra (palavrões), e dá para marcar à mão
 - **Retrospectiva** como Spotify Wrapped / Apple Music Replay: minutos ouvidos por artista, música, álbum e gênero, por semana, mês, ano ou desde sempre, com modo "story" em tela cheia (tudo fica no computador)
+- Aba **Estudos** com o [Arara Cypher](https://github.com/Githyot/Arara-Cypher) inteiro (cifras, tablaturas, editor, afinador e estudo) e o modo **Estudar** nas músicas que têm cifra: letra sincronizada junto da cifra, partes que acendem com a música, loop A–B, som da música liga/desliga, velocidade, treino de ouvido e contagem antes do play
 - Testado com 50 mil faixas: indexa em ~4 s e abre a janela em ~0,2 s
 
 Veja a análise e as medições em [docs/ANALISE.md](docs/ANALISE.md).
@@ -33,7 +34,8 @@ Veja a análise e as medições em [docs/ANALISE.md](docs/ANALISE.md).
 ```
 crates/arara-core   núcleo sem interface: banco, scanner, cache de capas, letras, servidores remotos
 crates/arara-cli    `arara`: linha de comando para indexar, buscar e testar letras
-crates/arara-app    `arara-music`: interface Qt/QML (cxx-qt)
+crates/arara-app    `arara-music`: interface Qt/QML (cxx-qt); a aba Estudos fica em qml/cypher
+crates/cypher-core  núcleo do Arara Cypher (cifras, acordes, tabs, afinador), sem Qt
 ```
 
 ## Compilar

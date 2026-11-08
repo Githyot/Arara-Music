@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.35
+Version:        0.7.37
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -20,6 +20,9 @@ Requires:       qt6-qtsvg
 # H.264 decoder for the animated album covers (falls back to the still cover without it)
 Recommends:     openh264
 Recommends:     xdg-desktop-portal-gnome
+# Aba Estudos (Arara Cypher): ler cifra de um print
+Recommends:     tesseract
+Recommends:     tesseract-langpack-por
 
 %description
 Arara Music é um player de música para Linux em Rust e Qt/QML, com visual
@@ -45,6 +48,13 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.37-1
+- Aba Estudos com o Arara Cypher inteiro: cifras, editor, afinador e estudo.
+- "Estudar" nas músicas que têm cifra (menu ⋮, painel e tela da letra):
+  cifra junto com a letra sincronizada, partes que acendem com a música,
+  loop A–B, som da música liga/desliga, velocidade, treino de ouvido e
+  contagem de 0 a 5 s antes do play.
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.35-1
 - Versão única com a 0.7.32 (números reais das faixas) e a 0.7.34
   (músicas repetidas mostram só a melhor cópia).

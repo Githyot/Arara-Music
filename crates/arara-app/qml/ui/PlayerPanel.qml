@@ -39,6 +39,9 @@ Rectangle {
     // Favourite excerpt (marked on the lyrics screen): a button plays it.
     property var excerpt: null
     property bool excerptPlaying: false
+    // Tem cifra no Arara Cypher: botão Estudar ao lado do trecho preferido.
+    property bool hasSheet: false
+    signal study()
     signal playExcerpt()
     signal menuRequested(var track, real x, real y)
     signal goArtist(var track)
@@ -234,6 +237,12 @@ Rectangle {
                     tip: panel.excerptPlaying ? "Parar o trecho preferido" : "Tocar o trecho preferido"
                     color: panel.excerptPlaying ? Qt.rgba(1, 1, 1, hovered ? 0.4 : 0.3) : hovered ? Qt.rgba(1, 1, 1, 0.2) : "transparent"
                     onClicked: panel.playExcerpt()
+                }
+                FlatButton {
+                    visible: panel.hasSheet
+                    icon: "study"; circular: true; iconColor: "white"
+                    tip: "Estudar: cifra, letra e loop"
+                    onClicked: panel.study()
                 }
                 FlatButton { icon: "lyrics"; circular: true; iconColor: "white"; tip: "Letra"; onClicked: panel.openLyrics() }
                 FlatButton { icon: "queue"; circular: true; iconColor: "white"; tip: "Fila"; onClicked: panel.tab = "queue" }
