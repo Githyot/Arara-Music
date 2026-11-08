@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.12
+Version:        0.7.13
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,16 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.13-1
+- Editar informações da música (menu ⋮ ou lápis na página Informações):
+  título, artista, álbum, artista do álbum, faixa, disco, ano, gênero,
+  composição e capa
+- Arquivos locais: as etiquetas são gravadas no próprio arquivo (por uma cópia
+  que substitui o original, sem cortar a música que está tocando). Dá para
+  escolher guardar só no Arara Music; músicas de servidor e discos sem
+  permissão de gravação ficam assim automaticamente, e a mudança continua
+  valendo depois de reindexar ou sincronizar ("Desfazer" volta ao original)
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.12-1
 - Capas de álbum certas: a capa é escolhida pela imagem que a maioria das
   faixas usa (capa frontal embutida e cover.jpg da pasta do álbum), em vez da

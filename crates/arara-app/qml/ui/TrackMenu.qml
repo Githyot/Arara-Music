@@ -22,6 +22,7 @@ Popup {
     signal share(var track)
     signal startStation(var track)
     signal showInfo(var track)
+    signal editInfo(var track)
     signal showLyrics(var track)
     signal copyLyrics(var track)
     signal editLyrics(var track)
@@ -155,6 +156,11 @@ Popup {
                 onTriggered: { menu.toggleExplicit(menu.track, menu.explicitShown); menu.close() }
             }
             Item_ { icon: "info"; label: "Informações e créditos"; onTriggered: { menu.showInfo(menu.track); menu.close() } }
+            Item_ {
+                visible: !!menu.track && !menu.track.free && menu.track.id > 0
+                icon: "edit"; label: "Editar informações…"
+                onTriggered: { menu.editInfo(menu.track); menu.close() }
+            }
             Item_ { icon: "lyrics"; label: "Ver letra"; onTriggered: { menu.showLyrics(menu.track); menu.close() } }
             Item_ { icon: "copy"; label: "Copiar letra"; onTriggered: { menu.copyLyrics(menu.track); menu.close() } }
             Item_ { icon: "edit"; label: "Editar letra…"; onTriggered: { menu.editLyrics(menu.track); menu.close() } }

@@ -38,7 +38,8 @@ Window {
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
-        hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close"
+        hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close",
+        edittags: true
     })
     property var prefs: prefDefaults
     function loadPrefs() {
@@ -187,12 +188,14 @@ Window {
         }
         onImportFinished: (json) => importDialog.finished(json)
         onPathPicked: (purpose, path) => {
-            if (purpose === "library") library.changeLibraryDir(path)
+            if (purpose === "trackcover") trackEdit.coverPicked(path)
+            else if (purpose === "library") library.changeLibraryDir(path)
             else if (purpose === "addlibrary") { library.addLibraryDir(path); foldersDialog.dirs = JSON.parse(library.libraryDirsJson()) }
             else if (purpose.indexOf("cover:") === 0) win.useAlbumCover(Number(purpose.slice(6)), path)
             else importDialog.pickedPath(path)
         }
         onPickerUnavailable: (purpose, directory) => {
+            if (purpose === "trackcover") { coverFileDialog.open(); return }
             if (purpose === "library" || purpose === "addlibrary") { folderDialog.adding = purpose === "addlibrary"; folderDialog.open() }
             else if (purpose.indexOf("cover:") === 0) { coverDialog.albumId = Number(purpose.slice(6)); coverDialog.open() }
             else importDialog.fallback(directory)
@@ -1036,6 +1039,7 @@ Window {
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onShowInFolder: (t) => { if (!library.showInFolder(t.id)) toast.show("Não foi possível abrir a pasta") }
+                    onEditRequested: (t) => win.editTrack(t)
                     onRefreshOnline: (t) => { infoPage.loading = true; library.requestOnlineInfo("track", t.id, true) }
                     onOpenLink: (url) => Qt.openUrlExternally(url)
                 }
@@ -1311,6 +1315,7 @@ Window {
         onShare: (t) => win.copyText(t.title + " — " + t.artist + (t.album ? " (" + t.album + ")" : ""), "Título e artista copiados")
         onStartStation: (t) => win.startStation(t)
         onShowInfo: (t) => nav.openTrackInfo(t)
+        onEditInfo: (t) => win.editTrack(t)
         onShowLyrics: (t) => win.showLyricsOf(t)
         onCopyLyrics: (t) => {
             var txt = library.lyricsText(t.id)
@@ -1325,6 +1330,59 @@ Window {
         onShowInFolder: (t) => { if (!library.showInFolder(t.id)) toast.show("Não foi possível abrir a pasta") }
     }
     TextPrompt { id: prompt }
+
+    // ---------- editing a song ----------
+    function editTrack(t) {
+        var f = JSON.parse(library.editableJson(t.id))
+        if (!f) { toast.show("Esta música não está na biblioteca"); return }
+        trackEdit.start(t, f, win.prefs.edittags)
+    }
+    TrackEditDialog {
+        id: trackEdit
+        onPickCover: library.pickPath("trackcover", "Escolha a imagem da capa", false)
+        onSubmit: (id, json, cover, writeFile) => {
+            if (orig.local) win.setPref("edittags", writeFile)
+            library.saveTrackEdit(id, json, cover, writeFile)
+        }
+        onRevert: (id) => {
+            if (library.revertTrackEdit(id)) toast.show(trackEdit.orig && trackEdit.orig.local ? "Lendo de novo as informações do arquivo…" : "Mudanças desfeitas; voltam do servidor na próxima sincronização")
+        }
+    }
+    FileDialog {
+        id: coverFileDialog
+        title: "Escolha a imagem da capa"
+        nameFilters: ["Imagens (*.jpg *.jpeg *.png *.webp)", "Todos os arquivos (*)"]
+        onAccepted: trackEdit.coverPicked(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+    }
+    Connections {
+        target: library
+        function onTrackEdited(trackId, json) {
+            var res = JSON.parse(json); trackId = Number(trackId)
+            trackEdit.finished(res)
+            if (res.error) return
+            toast.show(res.wroteFile ? "Informações salvas no arquivo"
+                : res.warning ? "Salvo só no Arara Music: " + res.warning
+                : "Informações salvas")
+            var fresh = res.track
+            if (!fresh) return
+            // Songs already in the queue show the new details right away.
+            var q = player.queue, changed = false
+            for (var i = 0; i < q.length; i++) {
+                if (q[i] && q[i].id === trackId && !q[i].free) {
+                    if (!changed) { q = q.slice(); changed = true }
+                    q[i] = Object.assign({}, q[i], fresh)
+                }
+            }
+            if (changed) { player.queue = q; player.save() }
+            if (nav.page === "trackinfo" && infoPage.info && infoPage.info.id === trackId) { nav.trackInfo = fresh; win.loadTrackInfo(fresh) }
+            if (nav.page === "album" && nav.album) {
+                var a = albumGrid.albums.find(function (x) { return x.id === nav.album.id })
+                if (!a && fresh.albumId !== null && fresh.albumId !== undefined) a = albumGrid.albums.find(function (x) { return x.id === fresh.albumId })
+                if (a) { nav.album = a; albumPage.tracks = JSON.parse(library.albumTracksJson(a.id)) }
+            }
+            if (player.current && player.current.id === trackId) win.refreshCoverLook()
+        }
+    }
     Timer { id: volumeSave; interval: 600; onTriggered: library.setSetting("volume", String(win.userVolume)) }
     ImportDialog {
         id: importDialog
@@ -1339,7 +1397,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.8",
+        onAbout: prompt.info("Arara Music 0.7.13",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     PreferencesDialog {
@@ -1411,7 +1469,7 @@ Window {
 
     onClosing: { listen.flush(); player.save() }
 
-    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible && !addServer.visible && !importDialog.visible; onActivated: playerBar.toggle() }
+    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !trackEdit.visible && !lyricsEditor.visible && !addServer.visible && !importDialog.visible; onActivated: playerBar.toggle() }
     Shortcut { sequence: "Ctrl+F"; onActivated: nav.go("songs") }
     Shortcut { sequence: "Ctrl+Right"; onActivated: player.next() }
     Shortcut { sequence: "Ctrl+Left"; onActivated: player.prev() }

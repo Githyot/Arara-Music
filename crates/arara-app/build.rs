@@ -35,6 +35,7 @@ fn main() {
         "qml/ui/ArtistGrid.qml",
         "qml/ui/TrackListPage.qml",
         "qml/ui/TrackMenu.qml",
+        "qml/ui/TrackEditDialog.qml",
         "qml/ui/TextPrompt.qml",
         "qml/ui/QueueView.qml",
         "qml/ui/DragReorder.qml",
