@@ -25,6 +25,8 @@ Item {
     signal cycleRepeat()
     signal volumeMoved(real v)
     signal close()
+    signal goArtist(var track)
+    signal goAlbum(var track)
     signal editLyrics()
     signal refetchLyrics()
     signal starToggled(var track, bool starred)
@@ -93,10 +95,31 @@ Item {
                     }
                     ExplicitBadge { id: lsE; anchors.verticalCenter: lsTitle.verticalCenter; track: ls.track; size: 17; fill: Qt.rgba(1, 1, 1, 0.75); ink: "#2b2b2b" }
                 }
-                Text {
-                    width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
-                    text: ls.track ? [ls.track.artist, ls.track.album].filter(function (x) { return !!x }).join(" — ") : ""
-                    color: Qt.rgba(1, 1, 1, 0.75); font.family: Theme.font; font.pointSize: Theme.fontSize + 1
+                // "Artist — Album": each name is a link to its page, like in the side panel.
+                Row {
+                    id: links
+                    readonly property string artist: ls.track ? ls.track.artist || "" : ""
+                    readonly property string album: ls.track ? ls.track.album || "" : ""
+                    readonly property real room: leftCol.width - (sep.visible ? sep.implicitWidth : 0)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    LinkText {
+                        id: artistLink
+                        text: links.artist
+                        width: Math.min(implicitWidth, links.album ? Math.max(links.room / 2, links.room - albumLink.implicitWidth) : links.room)
+                        onActivated: ls.goArtist(ls.track)
+                    }
+                    Text {
+                        id: sep
+                        visible: links.artist !== "" && links.album !== ""
+                        text: " — "
+                        color: Qt.rgba(1, 1, 1, 0.75); font.family: Theme.font; font.pointSize: Theme.fontSize + 1
+                    }
+                    LinkText {
+                        id: albumLink
+                        text: links.album
+                        width: Math.min(implicitWidth, links.room - artistLink.width)
+                        onActivated: ls.goAlbum(ls.track)
+                    }
                 }
             }
             PlayerControls {
@@ -155,5 +178,21 @@ Item {
         FlatButton { icon: "refresh"; circular: true; iconColor: "white"; visible: ls.track !== null && !ls.loadingLyrics; onClicked: ls.refetchLyrics() }
         FlatButton { icon: "edit"; tip: "Editar a letra"; circular: true; iconColor: "white"; visible: ls.track !== null; onClicked: ls.editLyrics() }
         FlatButton { icon: "pan-down"; circular: true; iconColor: "white"; onClicked: ls.close() }
+    }
+
+    component LinkText: Text {
+        id: lt
+        signal activated()
+        visible: text !== ""
+        elide: Text.ElideRight
+        color: Qt.rgba(1, 1, 1, ma.containsMouse ? 1 : 0.75)
+        font.family: Theme.font; font.pointSize: Theme.fontSize + 1
+        font.underline: ma.containsMouse
+        MouseArea {
+            id: ma
+            anchors.fill: parent
+            hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: lt.activated()
+        }
     }
 }

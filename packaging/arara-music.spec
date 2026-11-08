@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.15
+Version:        0.7.17
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,14 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.17-1
+- Tela da letra: artista e álbum viraram links (abrem a página do artista e
+  do álbum), como no painel lateral.
+- Botão anterior: o segundo toque logo depois de voltar ao início vai para a
+  música anterior, mesmo se o reprodutor ainda informa a posição antiga; os
+  3 segundos contam a partir do início real da faixa (intro cortada); e ao
+  tocar uma música de outra lista, o anterior volta para o que tocava antes.
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.15-1
 - Sombra da capa no painel do player igual à do visual Apple: macia,
   desfocada e um pouco abaixo da capa, sem os anéis escuros em volta

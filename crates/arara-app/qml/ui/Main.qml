@@ -239,7 +239,17 @@ Window {
         property bool restoring: false
 
         property int failures: 0
-        function playList(list, i) { queue = list.slice(); index = i; shuffle = false; start(true) }
+        // A new queue keeps what already played from the old one, so "previous"
+        // still goes back after starting a song from a list, a station…
+        function playList(list, i) {
+            if (current && !sameList(queue, list)) {
+                var p = played.concat(queue.slice(Math.max(0, index - 99), index + 1))
+                // the song about to play is not "before" itself
+                while (p.length && list[i] && p[p.length - 1].id === list[i].id) p.pop()
+                played = p.slice(-100)
+            }
+            queue = list.slice(); index = i; shuffle = false; start(true)
+        }
         // `mixed`: the decks already started this song (automatic transition).
         function start(autoplay, mixed) {
             if (!current) { decks.stopAll(); return }
@@ -264,7 +274,37 @@ Window {
             else if (repeat === "all" && queue.length > 0) { index = 0; start(true) }
             else if (win.autoplay && current && extendAutoplay()) { index++; start(true) }
         }
-        function prev() { if (media.position > 3000 || index <= 0) seekTo(0); else { index--; start(true) } }
+        // Songs played before the current queue started (oldest first).
+        property var played: []
+        property double lastRewind: 0
+        // Previous: 3 s into the song it starts it over; a second press (or a press
+        // near the start) goes to the song before. The start is where the song
+        // really begins (trimmed intro), and a press right after a rewind counts
+        // as "at the start" even if the backend still reports the old position.
+        function prev() {
+            if (!current) return
+            var pos = media.position - xf.startFor(current)
+            var justRewound = Date.now() - lastRewind < 3000
+            while (played.length && played[played.length - 1].id === current.id) played = played.slice(0, -1)
+            var hasBefore = index > 0 || played.length > 0 || (repeat === "all" && queue.length > 1)
+            if ((pos > 3000 && !justRewound) || !hasBefore) { lastRewind = Date.now(); seekTo(xf.startFor(current)); return }
+            lastRewind = 0
+            if (index > 0) { index--; start(true); return }
+            if (played.length > 0) {
+                var t = played[played.length - 1]
+                played = played.slice(0, -1)
+                queue = [t].concat(queue); index = 0
+                start(true)
+                return
+            }
+            index = queue.length - 1; start(true)
+        }
+        // Same songs in the same order (a double click starts one list twice).
+        function sameList(a, b) {
+            if (a.length !== b.length) return false
+            for (var k = 0; k < a.length; k++) if (a[k].id !== b[k].id) return false
+            return true
+        }
         function jump(i) { index = i; start(true) }
         // The song that would play after this one, without changing anything
         // (null at the end of the queue, or when repeating one song).
@@ -318,6 +358,7 @@ Window {
         }
         // Remove tracks that no longer exist (e.g. a removed server) from the queue.
         function dropWhere(pred) {
+            played = played.filter(function (t) { return !pred(t) })
             var cur = current, q = queue.filter(function (t) { return !pred(t) })
             if (q.length === queue.length) return
             if (cur && pred(cur)) { decks.stopAll(); queue = q; index = q.length ? 0 : -1; if (current) start(false) }
@@ -1144,6 +1185,8 @@ Window {
                     onCycleRepeat: player.cycleRepeat()
                     onVolumeMoved: (v) => win.setVolume(v)
                     onClose: win.lyricsMode = false
+                    onGoArtist: (t) => win.goToArtistOf(t)
+                    onGoAlbum: (t) => win.goToAlbumOf(t)
                     onEditLyrics: lyricsEditor.openWith(player.current, win.lyrics)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onAddToPlaylist: (t, x, y) => { if (t && !t.free) trackMenu.openPlaylistsAt(t, x, y, sidebar.playlists) }
