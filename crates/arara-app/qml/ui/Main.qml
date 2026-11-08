@@ -95,6 +95,25 @@ Window {
         }
         excerptRev++
     }
+    // ---------- A/B loop ----------
+    readonly property bool looping: excerptPlay.active && excerptPlay.loop
+    readonly property var loopRange: looping ? { s: excerptPlay.start, e: excerptPlay.end } : null
+    // From the track menu: plays the song (if needed), opens the lyrics screen
+    // and asks for the start and the end of the part to repeat.
+    function loopSection(t) {
+        if (looping && player.current && player.current.id === t.id) { stopLoop(); return }
+        win.showLyricsOf(t)
+        Qt.callLater(function () { lyricsScreen.startMarking("loop") })
+    }
+    function startLoop(s, e) {
+        excerptPlay.begin(s, e, true)
+        toast.show("Repetindo " + fmtMs(s) + " – " + fmtMs(e) + " em loop")
+    }
+    function stopLoop() {
+        if (!looping) return
+        excerptPlay.active = false
+        toast.show("Loop desligado")
+    }
     function fmtMs(ms) {
         var t = Math.max(0, Math.round(ms / 1000))
         return Math.floor(t / 60) + ":" + ("0" + (t % 60)).slice(-2)
@@ -1253,7 +1272,11 @@ Window {
                     onEditLyrics: lyricsEditor.openWith(player.current, win.lyrics)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     excerpt: win.excerpt
-                    excerptPlaying: excerptPlay.active
+                    excerptPlaying: excerptPlay.active && !excerptPlay.loop
+                    loopRange: win.loopRange
+                    onLoopSet: (s, e) => win.startLoop(s, e)
+                    onStopLoop: win.stopLoop()
+                    onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onExcerptSet: (t, s, e) => win.setExcerpt(t, s, e)
                     onExcerptCleared: (t) => win.setExcerpt(t, -1, -1)
                     onPlayExcerpt: excerptPlay.toggle()
@@ -1304,7 +1327,9 @@ Window {
             onClose: { win.panelOpen = false; library.setSetting("panel", "0") }
             onStarToggled: (t, s) => win.onStar(t, s)
             excerpt: win.excerpt
-            excerptPlaying: excerptPlay.active
+            excerptPlaying: excerptPlay.active && !excerptPlay.loop
+            loopRange: win.loopRange
+            onStopLoop: win.stopLoop()
             onPlayExcerpt: excerptPlay.toggle()
             onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
             onGoArtist: (t) => win.goToArtistOf(t)
@@ -1382,6 +1407,8 @@ Window {
     TrackMenu {
         id: trackMenu
         parent: frame
+        loopingId: win.looping ? excerptPlay.trackId : -1
+        onLoopSection: (t) => win.loopSection(t)
         onPlayNext: (t) => player.playNext(t)
         onEnqueue: (t) => player.enqueue(t)
         onToggleExplicit: (t, shown) => {
@@ -1484,13 +1511,21 @@ Window {
         property real start: 0
         property real last: 0
         property double since: 0
+        // A/B loop for studying a part: at the end it jumps back to the start
+        // and keeps going until it is turned off.
+        property bool loop: false
         function toggle() {
-            if (active) { stop(true); return }
+            if (active && !loop) { stop(true); return }
             var x = win.excerpt
             if (!x || !player.current) return
-            trackId = player.current.id; start = x.s; end = x.e; last = x.s; since = Date.now()
+            begin(x.s, x.e, false)
+        }
+        function begin(s, e, asLoop) {
+            if (!player.current) return
+            trackId = player.current.id; start = s; end = e; last = s; since = Date.now()
+            loop = asLoop
             active = true
-            player.seekTo(x.s)
+            player.seekTo(s)
             if (media.playbackState !== MediaPlayer.PlayingState) player.resume()
         }
         function stop(pause) {
@@ -1503,6 +1538,13 @@ Window {
             if (!player.current || player.current.id !== trackId) { active = false; return }
             // Right after the jump the backend may still report the old position.
             if (Date.now() - since < 800) { if (pos >= start - 200 && pos < end) last = pos; return }
+            if (loop) {
+                // Seeking inside the loop is fine; seeking away from it turns it off.
+                if (pos < start - 1500 || pos > end + 1500) { active = false; toast.show("Loop desligado"); return }
+                last = pos
+                if (pos >= end - 120) { since = Date.now(); last = start; player.seekTo(start) }
+                return
+            }
             // A jump by hand (not the playback moving on) cancels it.
             if (pos < start - 1500 || pos - last > 2500) { active = false; return }
             last = pos
@@ -1528,7 +1570,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.35",
+        onAbout: prompt.info("Arara Music 0.7.36",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     // Decodes the animated covers once for every place that shows them.

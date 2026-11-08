@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.35
+Version:        0.7.36
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -45,6 +45,12 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.36-1
+- Trecho em loop: no menu de três pontinhos, "Repetir um trecho em loop"
+  pede o início e o fim (na letra ou pela posição atual) e repete essa
+  parte até você desligar, para estudar. A tela da letra ganhou o menu
+  de três pontinhos também.
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.35-1
 - Versão única com a 0.7.32 (números reais das faixas) e a 0.7.34
   (músicas repetidas mostram só a melhor cópia).
