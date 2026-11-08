@@ -127,10 +127,11 @@ Rectangle {
                         width: parent.width + margin * 2; height: parent.height + margin * 2
                         fragmentShader: "qrc:/qt/qml/AraraStyle/shadow.frag.qsb"
                     }
-                    CoverArt {
+                    MotionCover {
                         anchors.fill: parent
                         decode: 640
                         source: panel.track ? panel.track.coverBig : ""
+                        albumId: panel.track && panel.track.albumId ? panel.track.albumId : -1
                     }
                 }
             }

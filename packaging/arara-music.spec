@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.21
+Version:        0.7.22
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -17,6 +17,8 @@ Requires:       qt6-qtbase-gui
 Requires:       qt6-qtdeclarative
 Requires:       qt6-qtmultimedia
 Requires:       qt6-qtsvg
+# H.264 decoder for the animated album covers (falls back to the still cover without it)
+Recommends:     openh264
 Recommends:     xdg-desktop-portal-gnome
 
 %description
@@ -43,6 +45,14 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.22-1
+- Junta as capas animadas à versão 0.7.21.
+- Capas animadas: quando o álbum tem capa animada no Apple Music, ela toca
+  sem som na página do álbum e no painel. Opção em Preferências > Biblioteca
+  (desligada por padrão), com "Baixar agora" para todos os álbuns e "Apagar".
+  Cada capa é baixada uma vez (cerca de 2 MB) e fica no cache. O vídeo só
+  roda com a janela em foco e na tela; fora disso fica a capa normal.
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.21-1
 - Versão única que junta tudo desde a 0.7.12: editar informações da música
   (0.7.13), sem Música livre (0.7.14), sombra da capa (0.7.15), links e

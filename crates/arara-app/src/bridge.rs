@@ -409,6 +409,37 @@ pub mod qobject {
         #[cxx_name = "onlineInfo"]
         fn online_info(self: Pin<&mut Library>, kind: QString, id: i64, json: QString);
 
+        /// Animated cover of an album, if it is already on disk ("" otherwise).
+        /// When the preference is on and the album wasn't asked yet, it is
+        /// looked up and downloaded in the background; `motionCoverReady` follows.
+        #[qinvokable]
+        #[cxx_name = "motionCover"]
+        fn motion_cover(self: Pin<&mut Library>, album_id: i64) -> QString;
+
+        #[qsignal]
+        #[cxx_name = "motionCoverReady"]
+        fn motion_cover_ready(self: Pin<&mut Library>, album_id: i64, url: QString);
+
+        /// Queue every album of the library for an animated cover (Preferences).
+        #[qinvokable]
+        #[cxx_name = "downloadAllMotionCovers"]
+        fn download_all_motion_covers(self: Pin<&mut Library>);
+
+        /// Background queue progress: albums checked / queued, animated covers found.
+        #[qsignal]
+        #[cxx_name = "motionProgress"]
+        fn motion_progress(self: Pin<&mut Library>, done: i32, total: i32, found: i32);
+
+        /// Delete the downloaded animated covers; returns how many files went.
+        #[qinvokable]
+        #[cxx_name = "clearMotionCovers"]
+        fn clear_motion_covers(self: Pin<&mut Library>) -> i32;
+
+        /// {"files": n, "bytes": n} of the animated cover cache.
+        #[qinvokable]
+        #[cxx_name = "motionCacheJson"]
+        fn motion_cache_json(self: &Library) -> QString;
+
         /// Library items sharing a genre/tag ("Similares" page): artists,
         /// albums and songs, local and from synced servers. `exclude_artist`
         /// (-1 = none) is the artist whose chip was clicked.
@@ -502,6 +533,16 @@ pub struct LibraryRust {
     watch_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     mpris: Option<Mpris>,
     inhibit: Option<desktop::Inhibitor>,
+    motion: Option<MotionQueue>,
+}
+
+/// One worker thread that looks up and downloads animated covers, one album
+/// at a time (gentle on the lookup service and on the disk).
+struct MotionQueue {
+    tx: std::sync::mpsc::Sender<(i64, String, String)>,
+    /// Albums queued or being fetched, so a page opened twice asks once.
+    pending: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<i64>>>,
+    total: std::sync::Arc<std::sync::atomic::AtomicI32>,
 }
 
 impl Default for LibraryRust {
@@ -534,6 +575,7 @@ impl Default for LibraryRust {
             missing_dirs: QString::from("[]"),
             mpris: None,
             inhibit: None,
+            motion: None,
         }
     }
 }
@@ -1540,6 +1582,130 @@ impl qobject::Library {
             let s = data.to_string();
             let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs(&s)));
         });
+    }
+
+    fn motion_dir(&self) -> PathBuf {
+        self.covers_dir.join("motion")
+    }
+
+    fn motion_enabled(&self) -> bool {
+        self.online_allowed() && self.db.as_ref().and_then(|d| d.get_kv("pref:motioncovers").ok().flatten()).is_some_and(|v| v == "1")
+    }
+
+    /// (artist, title) of an album, from the index only.
+    fn album_names(&self, album_id: i64) -> Option<(String, String)> {
+        let db = self.db.as_ref()?;
+        db.conn.query_row(
+            "SELECT COALESCE(ar.name, ''), al.title FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ?1",
+            [album_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        ).ok()
+    }
+
+    fn motion_queue(mut self: Pin<&mut Self>) -> &MotionQueue {
+        if self.motion.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<(i64, String, String)>();
+            let pending: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<i64>>> = Default::default();
+            let total: std::sync::Arc<std::sync::atomic::AtomicI32> = Default::default();
+            let qt = self.qt_thread();
+            let db_path = self.db_path.clone();
+            let dir = self.motion_dir();
+            let (p2, t2) = (pending.clone(), total.clone());
+            std::thread::Builder::new().name("motion-covers".into()).spawn(move || {
+                use std::sync::atomic::Ordering;
+                let Ok(db) = Db::open(&db_path) else { return };
+                let (mut done, mut found) = (0i32, 0i32);
+                for (id, artist, title) in rx {
+                    let url = match arara_core::motion::cached(&db, &dir, &artist, &title, now()) {
+                        arara_core::motion::Cached::Ready(p) => Some(p),
+                        arara_core::motion::Cached::Missing => None,
+                        arara_core::motion::Cached::Unknown => {
+                            let r = arara_core::motion::fetch(&db, &dir, &artist, &title, now(), arara_core::motion::DEFAULT_SIDE);
+                            // Be gentle with the free lookup service.
+                            std::thread::sleep(std::time::Duration::from_millis(700));
+                            r
+                        }
+                    };
+                    let url = url.map(|p| remote::file_url(&p.to_string_lossy())).unwrap_or_default();
+                    p2.lock().unwrap().remove(&id);
+                    done += 1;
+                    if !url.is_empty() { found += 1; }
+                    let total = t2.load(Ordering::Relaxed);
+                    let idle = p2.lock().unwrap().is_empty();
+                    let (d, f) = (done, found);
+                    if idle { done = 0; found = 0; t2.store(0, Ordering::Relaxed); }
+                    let _ = qt.queue(move |mut o| {
+                        o.as_mut().motion_cover_ready(id, qs(&url));
+                        o.motion_progress(d, total, f);
+                    });
+                }
+            }).ok();
+            self.as_mut().rust_mut().motion = Some(MotionQueue { tx, pending, total });
+        }
+        self.into_ref().get_ref().motion.as_ref().unwrap()
+    }
+
+    fn enqueue_motion(self: Pin<&mut Self>, album_id: i64, artist: String, title: String) {
+        let q = self.motion_queue();
+        if q.pending.lock().unwrap().insert(album_id) {
+            q.total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let _ = q.tx.send((album_id, artist, title));
+        }
+    }
+
+    pub fn motion_cover(self: Pin<&mut Self>, album_id: i64) -> QString {
+        if !self.motion_enabled() {
+            return QString::default();
+        }
+        let Some((artist, title)) = self.album_names(album_id) else { return QString::default() };
+        if title.trim().is_empty() {
+            return QString::default();
+        }
+        let Some(db) = self.db.as_ref() else { return QString::default() };
+        match arara_core::motion::cached(db, &self.motion_dir(), &artist, &title, now()) {
+            arara_core::motion::Cached::Ready(p) => qs(&remote::file_url(&p.to_string_lossy())),
+            arara_core::motion::Cached::Missing => QString::default(),
+            arara_core::motion::Cached::Unknown => {
+                self.enqueue_motion(album_id, artist, title);
+                QString::default()
+            }
+        }
+    }
+
+    pub fn download_all_motion_covers(mut self: Pin<&mut Self>) {
+        if !self.motion_enabled() {
+            return;
+        }
+        let Some(db) = self.db.as_ref() else { return };
+        let dir = self.motion_dir();
+        let t = now();
+        let todo: Vec<(i64, String, String)> = db.conn.prepare(
+            "SELECT al.id, COALESCE(ar.name, ''), al.title FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id
+             WHERE al.title <> '' AND EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id) ORDER BY al.added_at DESC",
+        ).and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()).unwrap_or_default();
+        let todo: Vec<_> = todo.into_iter()
+            .filter(|(_, a, ti)| matches!(arara_core::motion::cached(db, &dir, a, ti, t), arara_core::motion::Cached::Unknown))
+            .collect();
+        if todo.is_empty() {
+            let qt = self.qt_thread();
+            let _ = qt.queue(|o| o.motion_progress(0, 0, 0));
+            return;
+        }
+        for (id, a, ti) in todo {
+            self.as_mut().enqueue_motion(id, a, ti);
+        }
+        let total = self.motion.as_ref().map_or(0, |q| q.total.load(std::sync::atomic::Ordering::Relaxed));
+        self.as_mut().motion_progress(0, total, 0);
+    }
+
+    pub fn clear_motion_covers(self: Pin<&mut Self>) -> i32 {
+        let Some(db) = self.db.as_ref() else { return 0 };
+        arara_core::motion::clear(db, &self.motion_dir()) as i32
+    }
+
+    pub fn motion_cache_json(&self) -> QString {
+        let dir = self.motion_dir();
+        let files = std::fs::read_dir(&dir).map(|rd| rd.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "mp4")).count()).unwrap_or(0);
+        qs(&json!({ "files": files, "bytes": arara_core::motion::disk_usage(&dir) }).to_string())
     }
 
     pub fn tag_json(&self, tag: &QString, exclude_artist: i64) -> QString {
