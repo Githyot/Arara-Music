@@ -52,6 +52,10 @@ Item {
         loaded = true
         lv.positionViewAtBeginning()
     }
+    // Play everything listed, in order or shuffled. Shuffle samples the whole
+    // result (not just the first 500 rows), so "all songs" really is random.
+    function playAll() { if (model.count > 0) page.play(JSON.parse(model.sliceJson(0, 500)), 0) }
+    function playShuffled() { if (model.count > 0) page.play(JSON.parse(model.shuffledJson(500)), 0) }
     function search(q) { query = q; run() }
     function reload() { run() }
     function open(filter, title, s) { baseFilter = filter; heading = title; sort = s || "artist"; userSorted = !!s; scope = "all"; query = ""; run() }
@@ -77,14 +81,10 @@ Item {
             Row {
                 spacing: 8
                 visible: model.count > 0
-                FlatButton { text: "Reproduzir"; suggested: true; onClicked: page.play(JSON.parse(model.sliceJson(0, 500)), 0) }
+                FlatButton { text: "Reproduzir"; suggested: true; onClicked: page.playAll() }
                 FlatButton {
                     visible: model.count > 1; text: "Aleatório"; color: Theme.hover
-                    onClicked: {
-                        var t = JSON.parse(model.sliceJson(0, 500))
-                        for (var i = t.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = t[i]; t[i] = t[j]; t[j] = x }
-                        page.play(t, 0)
-                    }
+                    onClicked: page.playShuffled()
                 }
             }
             Item { width: 1; height: 6 }
@@ -119,6 +119,14 @@ Item {
                 }
                 MouseArea { id: sortMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: sortMenu.openUnder(sortBtn) }
             }
+        }
+        // Search results and "all songs" get the same play buttons as album
+        // and category pages (those show them under the big title).
+        Row {
+            visible: page.bigTitle === "" && model.count > 0
+            spacing: 8
+            FlatButton { text: "Reproduzir"; suggested: true; onClicked: page.playAll() }
+            FlatButton { visible: model.count > 1; text: "Aleatório"; color: hovered ? Theme.pressed : Theme.hover; onClicked: page.playShuffled() }
         }
         // Search scopes (AdwToggleGroup-like chips), shown while searching.
         Flow {

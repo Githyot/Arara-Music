@@ -56,6 +56,12 @@ pub mod qobject {
         #[cxx_name = "sliceJson"]
         fn slice_json(self: &TrackModel, from: i32, count: i32) -> QString;
 
+        /// JSON array of up to `count` tracks picked at random from every row
+        /// (not just the first ones), already shuffled — for "Aleatório".
+        #[qinvokable]
+        #[cxx_name = "shuffledJson"]
+        fn shuffled_json(self: &TrackModel, count: i32) -> QString;
+
         #[qinvokable]
         #[cxx_name = "setStarredAt"]
         fn set_starred_at(self: Pin<&mut TrackModel>, row: i32, starred: bool);
@@ -204,6 +210,31 @@ impl qobject::TrackModel {
         let from = from.max(0) as usize;
         let end = (from + count.max(0) as usize).min(self.rows.len());
         let v: Vec<_> = self.rows.get(from..end).unwrap_or(&[]).iter().map(|t| self.track_json(t)).collect();
+        QString::from(serde_json::to_string(&v).unwrap().as_str())
+    }
+
+    pub fn shuffled_json(&self, count: i32) -> QString {
+        let n = self.rows.len();
+        let take = (count.max(0) as usize).min(n);
+        // Partial Fisher–Yates over row indices with a time-seeded xorshift:
+        // a fair sample of the whole result, without a rand dependency.
+        let mut seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9e37_79b9_7f4a_7c15)
+            | 1;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut idx: Vec<usize> = (0..n).collect();
+        for i in 0..take {
+            let j = i + (next() % (n - i) as u64) as usize;
+            idx.swap(i, j);
+        }
+        let v: Vec<_> = idx[..take].iter().map(|&i| self.track_json(&self.rows[i])).collect();
         QString::from(serde_json::to_string(&v).unwrap().as_str())
     }
 
