@@ -17,6 +17,7 @@
     <file alias="rounded.frag.qsb">qml/style/rounded.frag.qsb</file>
     <file alias="tint.frag.qsb">qml/style/tint.frag.qsb</file>
     <file alias="fade.frag.qsb">qml/style/fade.frag.qsb</file>
+    <file alias="shadow.frag.qsb">qml/style/shadow.frag.qsb</file>
     <file alias="icons/add.svg">qml/style/icons/add.svg</file>
     <file alias="icons/albums.svg">qml/style/icons/albums.svg</file>
     <file alias="icons/artist.svg">qml/style/icons/artist.svg</file>
@@ -68,6 +69,7 @@
     <file alias="icons/autoplay.svg">qml/style/icons/autoplay.svg</file>
     <file alias="icons/plays.svg">qml/style/icons/plays.svg</file>
     <file alias="icons/recap.svg">qml/style/icons/recap.svg</file>
+    <file alias="icons/home.svg">qml/style/icons/home.svg</file>
     <file alias="icons/added.svg">qml/style/icons/added.svg</file>
     <file alias="icons/year.svg">qml/style/icons/year.svg</file>
     <file alias="icons/genre.svg">qml/style/icons/genre.svg</file>

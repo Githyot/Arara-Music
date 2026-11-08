@@ -38,7 +38,8 @@ Window {
         // transitions between songs (see Decks.qml and the `xf` object below)
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true,
-        hidden: [], collapsed: ({ categories: true }), dlworkers: 2, jamendo: "", winbuttons: "close"
+        hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
+        edittags: true
     })
     property var prefs: prefDefaults
     function loadPrefs() {
@@ -54,7 +55,6 @@ Window {
         // 0.6 stored the cover accent as its own switch
         if (library.setting("accent", "") === "" && library.setting("coveraccent", "0") === "1") p.accent = "cover"
         prefs = p
-        win.infoBarOpen = library.setting("infobar", "1") === "1"
     }
     function setPref(k, v) {
         var p = Object.assign({}, prefs); p[k] = v; prefs = p
@@ -62,19 +62,22 @@ Window {
         library.setSetting(k, typeof d === "boolean" ? (v ? "1" : "0") : typeof d === "object" ? JSON.stringify(v) : String(v))
     }
     function resetPrefs() {
-        for (var k in prefDefaults) if (k !== "jamendo" && k !== "hidden" && k !== "collapsed") setPref(k, prefDefaults[k])
+        for (var k in prefDefaults) if (k !== "hidden" && k !== "collapsed") setPref(k, prefDefaults[k])
         toast.show("Preferências restauradas")
     }
     readonly property bool autoplay: prefs.autoplay
     readonly property bool trackListening: prefs.listening
     readonly property bool coverAccent: prefs.accent === "cover"
     readonly property bool autoLyrics: prefs.autolyrics
-    readonly property string jamendoKey: prefs.jamendo
     property var lyrics: ({ kind: "none" })
     property bool loadingLyrics: false
     // Blurred cover + sampled colours of the current track, for backgrounds.
     property string backdrop: ""
     property var coverColors: []
+    function useAlbumCover(id, path) {
+        library.setAlbumCover(id, path)
+        toast.show("Capa do álbum trocada")
+    }
     function refreshCoverLook() {
         var c = player.current ? player.current.cover : ""
         backdrop = c ? library.coverBlur(c) : ""
@@ -156,6 +159,7 @@ Window {
         if (servicesStarted) return
         servicesStarted = true
         library.startServices()
+        if (nav.page === "home") homePage.reload()
         if (win.prefs.restore) { library.heartbeat("restaurando a última música"); player.restore() }
         library.heartbeat("pronto")
     }
@@ -184,23 +188,20 @@ Window {
         }
         onImportFinished: (json) => importDialog.finished(json)
         onPathPicked: (purpose, path) => {
-            if (purpose === "library") library.changeLibraryDir(path)
+            if (purpose === "trackcover") trackEdit.coverPicked(path)
+            else if (purpose === "library") library.changeLibraryDir(path)
             else if (purpose === "addlibrary") { library.addLibraryDir(path); foldersDialog.dirs = JSON.parse(library.libraryDirsJson()) }
+            else if (purpose.indexOf("cover:") === 0) win.useAlbumCover(Number(purpose.slice(6)), path)
             else importDialog.pickedPath(path)
         }
         onPickerUnavailable: (purpose, directory) => {
+            if (purpose === "trackcover") { coverFileDialog.open(); return }
             if (purpose === "library" || purpose === "addlibrary") { folderDialog.adding = purpose === "addlibrary"; folderDialog.open() }
+            else if (purpose.indexOf("cover:") === 0) { coverDialog.albumId = Number(purpose.slice(6)); coverDialog.open() }
             else importDialog.fallback(directory)
         }
         onServerAdded: (ok, message) => { addServer.finished(ok, message); if (ok) toast.show(message) }
         onPlaylistsChanged: { sidebar.playlists = JSON.parse(library.playlistsJson()); if (nav.page === "playlist") nav.refresh() }
-        onFreeResults: (q, json, errs) => freePage.setResults(q, json, errs)
-        onDownloadEvent: (id, kind, pct, msg) => {
-            freePage.onEvent(id, kind, pct, msg)
-            if (kind === "done") toast.show(msg.endsWith("|lrc") ? "Baixada, com a letra sincronizada" : "Música baixada para a biblioteca")
-            else if (kind === "here") toast.show("Essa música já está na sua biblioteca")
-            else if (kind === "failed") toast.show("Não foi possível baixar: " + msg)
-        }
         onLyricsReady: (trackId, json) => {
             // qint64 arrives as an object in JS; compare as numbers
             if (player.current && player.current.id === Number(trackId)) { win.lyrics = JSON.parse(json); win.loadingLyrics = false }
@@ -239,7 +240,17 @@ Window {
         property bool restoring: false
 
         property int failures: 0
-        function playList(list, i) { queue = list.slice(); index = i; shuffle = false; start(true) }
+        // A new queue keeps what already played from the old one, so "previous"
+        // still goes back after starting a song from a list, a station…
+        function playList(list, i) {
+            if (current && !sameList(queue, list)) {
+                var p = played.concat(queue.slice(Math.max(0, index - 99), index + 1))
+                // the song about to play is not "before" itself
+                while (p.length && list[i] && p[p.length - 1].id === list[i].id) p.pop()
+                played = p.slice(-100)
+            }
+            queue = list.slice(); index = i; shuffle = false; start(true)
+        }
         // `mixed`: the decks already started this song (automatic transition).
         function start(autoplay, mixed) {
             if (!current) { decks.stopAll(); return }
@@ -264,7 +275,37 @@ Window {
             else if (repeat === "all" && queue.length > 0) { index = 0; start(true) }
             else if (win.autoplay && current && extendAutoplay()) { index++; start(true) }
         }
-        function prev() { if (media.position > 3000 || index <= 0) seekTo(0); else { index--; start(true) } }
+        // Songs played before the current queue started (oldest first).
+        property var played: []
+        property double lastRewind: 0
+        // Previous: 3 s into the song it starts it over; a second press (or a press
+        // near the start) goes to the song before. The start is where the song
+        // really begins (trimmed intro), and a press right after a rewind counts
+        // as "at the start" even if the backend still reports the old position.
+        function prev() {
+            if (!current) return
+            var pos = media.position - xf.startFor(current)
+            var justRewound = Date.now() - lastRewind < 3000
+            while (played.length && played[played.length - 1].id === current.id) played = played.slice(0, -1)
+            var hasBefore = index > 0 || played.length > 0 || (repeat === "all" && queue.length > 1)
+            if ((pos > 3000 && !justRewound) || !hasBefore) { lastRewind = Date.now(); seekTo(xf.startFor(current)); return }
+            lastRewind = 0
+            if (index > 0) { index--; start(true); return }
+            if (played.length > 0) {
+                var t = played[played.length - 1]
+                played = played.slice(0, -1)
+                queue = [t].concat(queue); index = 0
+                start(true)
+                return
+            }
+            index = queue.length - 1; start(true)
+        }
+        // Same songs in the same order (a double click starts one list twice).
+        function sameList(a, b) {
+            if (a.length !== b.length) return false
+            for (var k = 0; k < a.length; k++) if (a[k].id !== b[k].id) return false
+            return true
+        }
         function jump(i) { index = i; start(true) }
         // The song that would play after this one, without changing anything
         // (null at the end of the queue, or when repeating one song).
@@ -318,6 +359,7 @@ Window {
         }
         // Remove tracks that no longer exist (e.g. a removed server) from the queue.
         function dropWhere(pred) {
+            played = played.filter(function (t) { return !pred(t) })
             var cur = current, q = queue.filter(function (t) { return !pred(t) })
             if (q.length === queue.length) return
             if (cur && pred(cur)) { decks.stopAll(); queue = q; index = q.length ? 0 : -1; if (current) start(false) }
@@ -582,7 +624,7 @@ Window {
     // ---------- navigation ----------
     QtObject {
         id: nav
-        property string page: "albums"
+        property string page: "home"
         property var album: null
         property var artist: null
         property var playlist: null
@@ -590,19 +632,20 @@ Window {
         property var history: []
         property var group: null          // {kind, name} of the open genre/year/composer/folder
         property var trackInfo: null      // track whose info page is open
+        property var tag: null            // {name, fromName, excludeArtist, area} of the open "Similares" page
         // Sub-pages always get a back button, even when reached with no history.
-        readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group" || page === "trackinfo"
+        readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group" || page === "trackinfo" || page === "tag"
         // Sidebar entry the current view belongs to (an album opened from a server keeps "server").
-        property string section: "albums"
+        property string section: "home"
 
         // Snapshot of the current view, taken before a navigation changes it.
         function state() {
-            return { page: page, section: section, album: album, artist: artist, playlist: playlist, server: server, group: group, trackInfo: trackInfo,
+            return { page: page, section: section, album: album, artist: artist, playlist: playlist, server: server, group: group, trackInfo: trackInfo, tag: tag,
                      groupQuery: catSongs.baseFilter, groupTitle: catSongs.heading, groupSort: catSongs.sort }
         }
         function go(p, st) {
             // Reassign (not push) so bindings on history.length, like the back button, update.
-            if (p !== page || p === "group" || p === "album" || p === "artist" || p === "trackinfo") history = history.concat([st || state()])
+            if (p !== page || p === "group" || p === "album" || p === "artist" || p === "trackinfo" || p === "tag") history = history.concat([st || state()])
             page = p; if (p === "songs") section = "songs"
             refresh()
             if (p === "songs") search.forceActiveFocus(); else if (search.activeFocus && search.text === "") win.contentItem.forceActiveFocus()
@@ -612,13 +655,15 @@ Window {
             history = history.slice(0, -1)
             if (!h) {
                 // No history (e.g. restored state): go up to the parent listing.
-                root(page === "group" && group ? group.kind : page === "artist" ? "artists" : page === "trackinfo" ? "songs" : page === "album" && section !== "album" ? section : "albums")
+                root(page === "group" && group ? group.kind : page === "tag" ? "genre" : page === "artist" ? "artists" : page === "trackinfo" ? "songs" : page === "album" && section !== "album" ? section : "albums")
                 return
             }
             win.lyricsMode = false
             if ((h.page === "group" || h.page === "added") && h.groupQuery !== undefined) catSongs.open(h.groupQuery, h.groupTitle, h.groupSort)
             if (h.page === "album" && h.album) { albumPage.tracks = JSON.parse(library.albumTracksJson(h.album.id)) }
-            if (h.page === "artist" && h.artist) { artistAlbums.albums = JSON.parse(library.artistAlbumsJson(h.artist.id)) }
+            if (h.page === "artist" && h.artist) { artistPage.albums = JSON.parse(library.artistAlbumsJson(h.artist.id)) }
+            if (h.page === "tag" && h.tag) win.loadTag(h.tag)
+            tag = h.tag || null
             if (h.page === "trackinfo" && h.trackInfo) win.loadTrackInfo(h.trackInfo)
             trackInfo = h.trackInfo || null
             page = h.page; section = h.section || h.page; album = h.album; artist = h.artist; playlist = h.playlist; server = h.server; group = h.group || null; refresh()
@@ -645,7 +690,13 @@ Window {
             var a = albumGrid.albums.find(function (x) { return x.id === id })
             if (a) openAlbum(a)
         }
-        function openArtist(a) { var st = state(); artist = a; artistAlbums.albums = JSON.parse(library.artistAlbumsJson(a.id)); go("artist", st) }
+        function openArtist(a) { var st = state(); artist = a; artistPage.albums = JSON.parse(library.artistAlbumsJson(a.id)); artistPage.contentY = 0; go("artist", st) }
+        // Genre chip of an About block → "Similares" page for that genre.
+        function openTag(name, fromName, excludeArtist, area) {
+            var st = state(); win.lyricsMode = false
+            tag = { name: name, fromName: fromName || "", excludeArtist: excludeArtist === undefined ? -1 : excludeArtist, area: area || "" }
+            win.loadTag(tag); go("tag", st)
+        }
         function openArtistById(id) {
             var a = artistGrid.artists.find(function (x) { return x.id === id })
             if (a) openArtist(a)
@@ -654,6 +705,10 @@ Window {
         function openPlaylist(p) { var st = state(); playlist = p; go("playlist", st) }
         function openServer(s) { var st = state(); server = s; go("server", st) }
         function refresh() {
+            if (page === "album" && album) {
+                var al = albumGrid.albums.find(function (x) { return x.id === album.id })
+                if (al) album = al
+            }
             if (page === "server" && server) {
                 var all = JSON.parse(library.serversJson())
                 var sv = all.find(function (x) { return x.id === server.id })
@@ -661,6 +716,8 @@ Window {
                 server = sv
                 serverPage.albums = JSON.parse(library.serverAlbumsJson(sv.id))
             }
+            // The home page waits for the first frame (see startServices).
+            if (page === "home" && win.servicesStarted) homePage.reload()
             if (page === "genre" || page === "year" || page === "composer" || page === "folder") { groupsPage.kind = page; groupsPage.groups = JSON.parse(library.groupsJson(page)) }
             if (page === "starred") listPage.tracks = JSON.parse(library.starredJson())
             else if (page === "mostplayed") listPage.tracks = JSON.parse(library.mostPlayedJson())
@@ -673,7 +730,8 @@ Window {
                 listPage.tracks = JSON.parse(library.playlistTracksJson(p.id))
             }
         }
-        readonly property string title: page === "album" && album ? album.title
+        readonly property string title: page === "home" ? "Início"
+            : page === "album" && album ? album.title
             : page === "artist" && artist ? artist.name
             : page === "artists" ? "Artistas"
             : page === "starred" ? "Favoritas"
@@ -685,7 +743,8 @@ Window {
             : page === "playlist" ? "Playlist"
             : page === "server" ? "Servidor"
             : page === "trackinfo" ? "Informações"
-            : page === "songs" ? "Músicas" : page === "free" || page === "recap" ? "" : "Álbuns"
+            : page === "tag" && tag ? "Similares"
+            : page === "songs" ? "Músicas" : page === "recap" ? "" : "Álbuns"
     }
 
     // Now-playing panel → artist / album pages of the current track.
@@ -702,17 +761,13 @@ Window {
         if (ar) { win.lyricsMode = false; nav.openArtist(ar) } else toast.show("Artista não encontrado na biblioteca")
     }
     // ---------- info pages ----------
-    // Artist "Sobre" bar: docked by default when there is room; on narrow
-    // windows only after the ⓘ button (it would cover the page).
-    property bool infoBarOpen: true
-    property bool infoBarForced: false
-    property string infoKey: ""          // "<kind>:<id>" the bar currently shows
+    // Artist page: the "Sobre o artista" block lives in the page's left column.
+    property string infoKey: ""          // "artist:<id>" the artist page shows
     function loadTrackInfo(t) {
         infoPage.info = JSON.parse(library.trackInfoJson(t.id))
         infoPage.online = null; infoPage.loading = true
         library.requestOnlineInfo("track", t.id, false)
     }
-    function infoSubject() { return nav.page === "artist" ? nav.artist : null }
     property string albumInfoKey: ""
     // Album page: the "Sobre o álbum" block lives in the page itself.
     function loadAlbumAbout(force) {
@@ -728,32 +783,38 @@ Window {
     }
     function loadInfoBar(force) {
         loadAlbumAbout(force)
-        var subj = infoSubject()
-        if (!win.infoBarOpen || !subj) return
-        var kind = nav.page, key = kind + ":" + subj.id
+        if (nav.page !== "artist" || !nav.artist) return
+        var key = "artist:" + nav.artist.id
         if (key === win.infoKey && !force) return
         win.infoKey = key
-        infoBar.kind = kind; infoBar.subject = subj
-        infoBar.info = JSON.parse(kind === "artist" ? library.artistInfoJson(subj.id) : library.albumInfoJson(subj.id))
-        infoBar.online = null
-        infoBar.onlineOff = !win.prefs.onlineinfo
-        infoBar.loading = win.prefs.onlineinfo
-        library.requestOnlineInfo(kind, subj.id, !!force)
+        artistPage.aboutInfo = JSON.parse(library.artistInfoJson(nav.artist.id))
+        artistPage.aboutOnline = null
+        artistPage.aboutOff = !win.prefs.onlineinfo
+        artistPage.aboutLoading = win.prefs.onlineinfo
+        library.requestOnlineInfo("artist", nav.artist.id, !!force)
     }
-    function toggleInfoBar() {
-        var show = !content.infoBarShown
-        win.infoBarOpen = show; win.infoBarForced = show; win.infoKey = ""
-        library.setSetting("infobar", show ? "1" : "0")
-        loadInfoBar(false)
+    // "Similares" page: library part now, MusicBrainz artists when they arrive.
+    function loadTag(t) {
+        tagPage.tag = t.name; tagPage.fromName = t.fromName
+        tagPage.data = JSON.parse(library.tagJson(t.name, t.excludeArtist))
+        tagPage.knownArtists = artistGrid.artists
+        tagPage.online = null
+        tagPage.onlineOff = !win.prefs.onlineinfo
+        tagPage.onlineLoading = win.prefs.onlineinfo
+        if (win.prefs.onlineinfo) library.requestTagOnline(t.name, t.area)
     }
-    Connections { target: nav; function onPageChanged() { win.infoBarForced = false; win.loadInfoBar(false) } function onArtistChanged() { win.loadInfoBar(false) } function onAlbumChanged() { win.loadInfoBar(false) } }
+    Connections { target: nav; function onPageChanged() { win.loadInfoBar(false) } function onArtistChanged() { win.loadInfoBar(false) } function onAlbumChanged() { win.loadInfoBar(false) } }
     Connections {
         target: library
         function onOnlineInfo(kind, id, json) {
             var data = JSON.parse(json); id = Number(id)
             if (kind === "track" && infoPage.info && infoPage.info.id === id) { infoPage.online = data; infoPage.loading = false }
-            if (kind === "artist" && win.infoKey === kind + ":" + id) { infoBar.online = data; infoBar.loading = false }
+            if (kind === "artist" && win.infoKey === kind + ":" + id) { artistPage.aboutOnline = data; artistPage.aboutLoading = false }
             if (kind === "album" && win.albumInfoKey === "album:" + id) { albumPage.aboutOnline = data; albumPage.aboutLoading = false }
+        }
+        function onTagOnline(tag, json) {
+            if (tag !== tagPage.tag) return
+            tagPage.online = JSON.parse(json); tagPage.onlineLoading = false
         }
     }
     // Exact name first, then the main artist of "A feat. B" / "A & B".
@@ -789,6 +850,14 @@ Window {
         })
     }
     Connections { target: player; function onCurrentChanged() { win.refreshCoverLook() } }
+    // Home page shuffle buttons: a few hundred random songs from the whole
+    // library (or the favourites), with the shuffle button lit.
+    function shuffleLibrary(kind) {
+        var t = JSON.parse(library.shuffleJson(kind, 500))
+        if (!t.length) { toast.show(kind === "starred" ? "Nenhuma favorita ainda" : "Nenhuma música na biblioteca"); return }
+        player.playList(t, 0)
+        player.unshuffled = t.slice(); player.shuffle = true; player.save()
+    }
     function onTrackMenu(t, x, y) { trackMenu.openAt(t, x, y, sidebar.playlists) }
     function onStar(t, s) { library.setStarred(t.id, s); t.starred = s; if (nav.page === "starred") nav.refresh() }
 
@@ -895,26 +964,36 @@ Window {
             }
             Timer { id: searchTimer; interval: 120; onTriggered: songs.search(search.text) }
 
-            readonly property bool infoBarShown: win.infoBarOpen && nav.page === "artist" && !win.lyricsMode && (!infoBarOverlay || win.infoBarForced)
-            readonly property bool infoBarOverlay: content.width < 700
-            InfoBar {
-                id: infoBar
-                z: 6
-                anchors { right: parent.right; top: header.bottom; bottom: parent.bottom }
-                width: content.infoBarOverlay ? content.width : Math.min(360, Math.max(300, content.width * 0.4))
-                visible: content.infoBarShown
-                playingId: player.current ? player.current.id : -1
-                onCloseRequested: { win.infoBarOpen = false; win.infoBarForced = false; win.infoKey = ""; library.setSetting("infobar", "0") }
-                onPlayTracks: (t, i) => player.playList(t, i)
-                onOpenAlbum: (a) => nav.openAlbum(a)
-                onOpenLink: (url) => Qt.openUrlExternally(url)
-                onOpenFolder: (url) => Qt.openUrlExternally(url)
-                onRefreshOnline: win.loadInfoBar(true)
+            // A music folder can't be read (external disk locked or unplugged).
+            // Its songs stay in the library; the app rescans when it comes back.
+            Rectangle {
+                id: diskBanner
+                readonly property var missing: JSON.parse(library.missingDirs || "[]")
+                readonly property bool shown: missing.length > 0
+                anchors { left: parent.left; right: parent.right; top: header.bottom }
+                height: shown ? Math.max(52, bannerText.implicitHeight + 20) : 0
+                visible: shown
+                color: Qt.rgba(Theme.destructive.r, Theme.destructive.g, Theme.destructive.b, Theme.dark ? 0.16 : 0.10)
+                Icon { id: bannerIcon; anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter } name: "warning"; size: 16; color: Theme.destructive }
+                Text {
+                    id: bannerText
+                    anchors { left: bannerIcon.right; leftMargin: 10; right: bannerButton.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                    wrapMode: Text.Wrap
+                    text: diskBanner.missing.length === 0 ? ""
+                        : "Não consigo ler " + diskBanner.missing[0] + (diskBanner.missing.length > 1 ? " e mais " + (diskBanner.missing.length - 1) : "")
+                          + ". Se for um disco externo, conecte ou desbloqueie no Arquivos; as músicas voltam sozinhas."
+                    color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1
+                }
+                FlatButton {
+                    id: bannerButton
+                    anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                    text: "Abrir no Arquivos"; color: Theme.hover
+                    onClicked: library.openMissingDir(diskBanner.missing[0])
+                }
             }
             Item {
                 id: stack
-                anchors { left: parent.left; right: parent.right; top: header.bottom; bottom: parent.bottom
-                          rightMargin: content.infoBarShown && !content.infoBarOverlay ? infoBar.width : 0 }
+                anchors { left: parent.left; right: parent.right; top: diskBanner.bottom; bottom: parent.bottom }
                 // Each page change fades the new page in and lifts it a little.
                 transform: Translate { id: stackLift }
                 Connections {
@@ -927,6 +1006,23 @@ Window {
                     NumberAnimation { target: stackLift; property: "y"; from: Theme.reduceMotion ? 0 : 10; to: 0; duration: Theme.ms(260); easing.type: Easing.OutCubic }
                 }
 
+                HomePage {
+                    id: homePage
+                    anchors.fill: parent
+                    visible: nav.page === "home"
+                    trackCount: library.trackCount
+                    albumCount: library.albumCount
+                    scanning: library.scanning
+                    playingId: player.current ? player.current.id : -1
+                    onShuffle: (kind) => win.shuffleLibrary(kind)
+                    onOpenAlbum: (a) => nav.openAlbum(a)
+                    onPlayAlbum: (a) => { var t = JSON.parse(library.albumTracksJson(a.id)); if (t.length) player.playList(t, 0) }
+                    onOpenArtist: (a) => nav.openArtist(a)
+                    onPlay: (t, i) => player.playList(t, i)
+                    onSeeAll: (p) => nav.root(p)
+                    onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
+                    onStarToggled: (t, s) => win.onStar(t, s)
+                }
                 AlbumGrid {
                     id: albumGrid
                     anchors.fill: parent
@@ -939,54 +1035,41 @@ Window {
                     visible: nav.page === "artists"
                     onOpenArtist: (a) => nav.openArtist(a)
                 }
-                Item {
+                ArtistPage {
+                    id: artistPage
                     anchors.fill: parent
                     visible: nav.page === "artist"
-                    // Artist header (AdwStatusPage-ish, left aligned): avatar, name, counts, play buttons.
-                    function artistTracks() {
+                    artist: nav.artist
+                    playingId: player.current ? player.current.id : -1
+                    function allTracks() {
                         var out = []
-                        for (var i = 0; i < artistAlbums.albums.length; i++) out = out.concat(JSON.parse(library.albumTracksJson(artistAlbums.albums[i].id)))
+                        for (var i = 0; i < albums.length; i++) out = out.concat(JSON.parse(library.albumTracksJson(albums[i].id)))
                         return out
                     }
-                    Item {
-                        id: artistTitle
-                        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 24; rightMargin: 24; topMargin: 20 }
-                        height: 112
-                        CoverArt {
-                            id: artistAvatar
-                            width: 112; height: 112; radius: 56; decode: 224
-                            source: nav.artist ? (nav.artist.cover || "") : ""
-                        }
-                        Column {
-                            anchors { left: artistAvatar.right; leftMargin: 20; right: parent.right; verticalCenter: parent.verticalCenter }
-                            spacing: 4
-                            Text { text: "ARTISTA"; color: Theme.accentFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 2; font.weight: Font.Bold; font.letterSpacing: 0.6 }
-                            Text { width: parent.width; elide: Text.ElideRight; text: nav.artist ? nav.artist.name : ""; color: Theme.fg; font.family: Theme.displayFont; font.pointSize: Theme.titleSize; font.weight: Theme.titleWeight }
-                            Text { text: artistAlbums.albums.length + (artistAlbums.albums.length === 1 ? " álbum" : " álbuns"); color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize }
-                            Item { width: 1; height: 4 }
-                            Row {
-                                spacing: 8
-                                FlatButton { text: "Reproduzir"; suggested: true; onClicked: player.playList(artistTitle.parent.artistTracks(), 0) }
-                                FlatButton {
-                                    text: "Aleatório"; color: Theme.hover
-                                    onClicked: {
-                                        var t = artistTitle.parent.artistTracks()
-                                        for (var i = t.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = t[i]; t[i] = t[j]; t[j] = x }
-                                        player.playList(t, 0)
-                                    }
-                                }
-                                FlatButton {
-                                    icon: "info"; tip: "Sobre o artista"; color: content.infoBarShown ? Theme.selected : Theme.hover
-                                    onClicked: win.toggleInfoBar()
-                                }
-                            }
-                        }
+                    onPlayAll: (shuffle) => {
+                        var t = allTracks()
+                        if (shuffle) for (var i = t.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = t[i]; t[i] = t[j]; t[j] = x }
+                        player.playList(t, 0)
                     }
-                    AlbumGrid {
-                        id: artistAlbums
-                        anchors { left: parent.left; right: parent.right; top: artistTitle.bottom; bottom: parent.bottom; topMargin: 8 }
-                        onOpenAlbum: (a) => nav.openAlbum(a)
-                    }
+                    onOpenAlbum: (a) => nav.openAlbum(a)
+                    onPlayTracks: (t, i) => player.playList(t, i)
+                    onOpenLink: (url) => Qt.openUrlExternally(url)
+                    onOpenFolder: (url) => Qt.openUrlExternally(url)
+                    onOpenTag: (tag) => nav.openTag(tag, nav.artist ? nav.artist.name : "", nav.artist ? nav.artist.id : -1,
+                                                    artistPage.aboutOnline && artistPage.aboutOnline.country ? artistPage.aboutOnline.country : "")
+                    onRefreshAbout: win.loadInfoBar(true)
+                }
+                TagPage {
+                    id: tagPage
+                    anchors.fill: parent
+                    visible: nav.page === "tag"
+                    playingId: player.current ? player.current.id : -1
+                    onOpenArtist: (a) => nav.openArtist(a)
+                    onOpenAlbum: (a) => nav.openAlbum(a)
+                    onPlay: (t, i) => player.playList(t, i)
+                    onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
+                    onStarToggled: (t, s) => win.onStar(t, s)
+                    onOpenLink: (url) => Qt.openUrlExternally(url)
                 }
                 AlbumPage {
                     id: albumPage
@@ -1001,6 +1084,9 @@ Window {
                     onOpenLink: (url) => Qt.openUrlExternally(url)
                     onOpenFolder: (url) => Qt.openUrlExternally(url)
                     onRefreshAbout: win.loadAlbumAbout(true)
+                    onOpenTag: (tag) => nav.openTag(tag, nav.album ? nav.album.artist || "" : "", nav.album && nav.album.artistId ? nav.album.artistId : -1, "")
+                    onRefreshCover: (id) => { library.refreshAlbumCover(id); toast.show("Procurando a capa nos arquivos do álbum…") }
+                    onChooseCover: (id) => library.pickPath("cover:" + id, "Escolha a imagem da capa", false)
                 }
                 InfoPage {
                     id: infoPage
@@ -1015,6 +1101,7 @@ Window {
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onShowInFolder: (t) => { if (!library.showInFolder(t.id)) toast.show("Não foi possível abrir a pasta") }
+                    onEditRequested: (t) => win.editTrack(t)
                     onRefreshOnline: (t) => { infoPage.loading = true; library.requestOnlineInfo("track", t.id, true) }
                     onOpenLink: (url) => Qt.openUrlExternally(url)
                 }
@@ -1101,23 +1188,6 @@ Window {
                     onTurnOn: win.setPref("listening", true)
                 }
 
-                FreePage {
-                    id: freePage
-                    anchors.fill: parent
-                    visible: nav.page === "free"
-                    jamendoKey: win.jamendoKey
-                    playingIndex: {
-                        var c = player.current
-                        if (!c || !c.free) return -1
-                        for (var i = 0; i < results.length; i++) if (results[i].stream_url === c.url) return i
-                        return -1
-                    }
-                    onPlay: (tracks, i) => player.playList(tracks, i)
-                    onDownload: (t) => { if (!library.downloadFree(JSON.stringify(t))) toast.show("Este artista não permite baixar esta música") }
-                    onCancel: (id) => library.cancelDownload(id)
-                    onSaveKey: (k) => { win.setPref("jamendo", k); toast.show("Chave do Jamendo salva"); if (lastQuery) search(lastQuery) }
-                }
-
                 LyricsScreen {
                     id: lyricsScreen
                     anchors.fill: parent
@@ -1144,6 +1214,8 @@ Window {
                     onCycleRepeat: player.cycleRepeat()
                     onVolumeMoved: (v) => win.setVolume(v)
                     onClose: win.lyricsMode = false
+                    onGoArtist: (t) => win.goToArtistOf(t)
+                    onGoAlbum: (t) => win.goToAlbumOf(t)
                     onEditLyrics: lyricsEditor.openWith(player.current, win.lyrics)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     onAddToPlaylist: (t, x, y) => { if (t && !t.free) trackMenu.openPlaylistsAt(t, x, y, sidebar.playlists) }
@@ -1290,6 +1362,7 @@ Window {
         onShare: (t) => win.copyText(t.title + " — " + t.artist + (t.album ? " (" + t.album + ")" : ""), "Título e artista copiados")
         onStartStation: (t) => win.startStation(t)
         onShowInfo: (t) => nav.openTrackInfo(t)
+        onEditInfo: (t) => win.editTrack(t)
         onShowLyrics: (t) => win.showLyricsOf(t)
         onCopyLyrics: (t) => {
             var txt = library.lyricsText(t.id)
@@ -1304,6 +1377,59 @@ Window {
         onShowInFolder: (t) => { if (!library.showInFolder(t.id)) toast.show("Não foi possível abrir a pasta") }
     }
     TextPrompt { id: prompt }
+
+    // ---------- editing a song ----------
+    function editTrack(t) {
+        var f = JSON.parse(library.editableJson(t.id))
+        if (!f) { toast.show("Esta música não está na biblioteca"); return }
+        trackEdit.start(t, f, win.prefs.edittags)
+    }
+    TrackEditDialog {
+        id: trackEdit
+        onPickCover: library.pickPath("trackcover", "Escolha a imagem da capa", false)
+        onSubmit: (id, json, cover, writeFile) => {
+            if (orig.local) win.setPref("edittags", writeFile)
+            library.saveTrackEdit(id, json, cover, writeFile)
+        }
+        onRevert: (id) => {
+            if (library.revertTrackEdit(id)) toast.show(trackEdit.orig && trackEdit.orig.local ? "Lendo de novo as informações do arquivo…" : "Mudanças desfeitas; voltam do servidor na próxima sincronização")
+        }
+    }
+    FileDialog {
+        id: coverFileDialog
+        title: "Escolha a imagem da capa"
+        nameFilters: ["Imagens (*.jpg *.jpeg *.png *.webp)", "Todos os arquivos (*)"]
+        onAccepted: trackEdit.coverPicked(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+    }
+    Connections {
+        target: library
+        function onTrackEdited(trackId, json) {
+            var res = JSON.parse(json); trackId = Number(trackId)
+            trackEdit.finished(res)
+            if (res.error) return
+            toast.show(res.wroteFile ? "Informações salvas no arquivo"
+                : res.warning ? "Salvo só no Arara Music: " + res.warning
+                : "Informações salvas")
+            var fresh = res.track
+            if (!fresh) return
+            // Songs already in the queue show the new details right away.
+            var q = player.queue, changed = false
+            for (var i = 0; i < q.length; i++) {
+                if (q[i] && q[i].id === trackId && !q[i].free) {
+                    if (!changed) { q = q.slice(); changed = true }
+                    q[i] = Object.assign({}, q[i], fresh)
+                }
+            }
+            if (changed) { player.queue = q; player.save() }
+            if (nav.page === "trackinfo" && infoPage.info && infoPage.info.id === trackId) { nav.trackInfo = fresh; win.loadTrackInfo(fresh) }
+            if (nav.page === "album" && nav.album) {
+                var a = albumGrid.albums.find(function (x) { return x.id === nav.album.id })
+                if (!a && fresh.albumId !== null && fresh.albumId !== undefined) a = albumGrid.albums.find(function (x) { return x.id === fresh.albumId })
+                if (a) { nav.album = a; albumPage.tracks = JSON.parse(library.albumTracksJson(a.id)) }
+            }
+            if (player.current && player.current.id === trackId) win.refreshCoverLook()
+        }
+    }
     Timer { id: volumeSave; interval: 600; onTriggered: library.setSetting("volume", String(win.userVolume)) }
     ImportDialog {
         id: importDialog
@@ -1318,7 +1444,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.8",
+        onAbout: prompt.info("Arara Music 0.7.13",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     PreferencesDialog {
@@ -1329,10 +1455,19 @@ Window {
         setFn: win.setPref
         onChooseFolders: { foldersDialog.dirs = JSON.parse(library.libraryDirsJson()); foldersDialog.open() }
         onRescan: { library.changeLibraryDir(library.libraryDir); toast.show("Reindexando a biblioteca…") }
+        onRebuildCovers: { library.rebuildCovers(); toast.show("Refazendo as capas dos álbuns…") }
         onResetAll: prompt.confirm("Restaurar as preferências?", "Tema, cores, reprodução e letras voltam ao padrão.", "Restaurar", function () { win.resetPrefs() })
         onClearHistory: prompt.confirm("Apagar o histórico de escuta?", "Todas as retrospectivas voltam a zero. Não dá para desfazer.", "Apagar", function () {
             listen.restart(); library.clearListens(); recapPage.reload(); toast.show("Histórico de escuta apagado")
         })
+    }
+    // Fallback when the portal's file chooser is missing.
+    FileDialog {
+        id: coverDialog
+        property int albumId: -1
+        title: "Escolha a imagem da capa"
+        nameFilters: ["Imagens (*.jpg *.jpeg *.png *.webp)", "Todos os arquivos (*)"]
+        onAccepted: win.useAlbumCover(albumId, decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
     }
     FolderDialog {
         id: folderDialog
@@ -1381,7 +1516,7 @@ Window {
 
     onClosing: { listen.flush(); player.save() }
 
-    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !lyricsEditor.visible && !addServer.visible && !importDialog.visible; onActivated: playerBar.toggle() }
+    Shortcut { sequence: "Space"; enabled: !search.activeFocus && !prompt.visible && !trackEdit.visible && !lyricsEditor.visible && !addServer.visible && !importDialog.visible; onActivated: playerBar.toggle() }
     Shortcut { sequence: "Ctrl+F"; onActivated: nav.go("songs") }
     Shortcut { sequence: "Ctrl+Right"; onActivated: player.next() }
     Shortcut { sequence: "Ctrl+Left"; onActivated: player.prev() }

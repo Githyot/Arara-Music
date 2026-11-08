@@ -3,10 +3,9 @@
 
 pub mod analysis;
 pub mod covers;
-pub mod downloads;
 pub mod explicit;
-pub mod freemusic;
 pub mod db;
+pub mod edit;
 pub mod import;
 pub mod info;
 pub mod lyrics;
@@ -14,6 +13,7 @@ pub mod natural;
 pub mod query;
 pub mod remote;
 pub mod scanner;
+pub mod similar;
 pub mod stats;
 pub mod watcher;
 

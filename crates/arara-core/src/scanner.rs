@@ -11,7 +11,7 @@
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::{Accessor, ItemKey};
 use rayon::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
@@ -64,33 +64,40 @@ struct Parsed {
     bit_depth: Option<u8>,
     bitrate: Option<u32>,
     explicit: Option<bool>,
-    /// Hash of the album thumbnail written by the worker (first track of each album only).
+    /// Own picture of a track without an album.
     cover_hash: Option<String>,
+    /// Embedded front cover and folder art; the album cover is voted from these.
+    art_hash: Option<String>,
+    folder_art: Option<String>,
 }
 
-/// Which albums already have (or are getting) a cover, shared by the parser threads.
-pub struct CoverClaims {
-    albums: std::sync::Mutex<HashSet<(String, String)>>,
-    dirs: std::sync::Mutex<HashSet<PathBuf>>,
+/// Folder art (cover.jpg, folder.png…) per directory, looked up once and
+/// shared by the parser threads.
+pub struct FolderArt {
+    dirs: std::sync::Mutex<HashMap<PathBuf, Option<String>>>,
 }
 
-impl CoverClaims {
-    fn new(existing: HashSet<(String, String)>) -> Self {
-        Self { albums: std::sync::Mutex::new(existing), dirs: Default::default() }
+impl FolderArt {
+    fn new() -> Self {
+        Self { dirs: Default::default() }
     }
-    fn key(album: &str, artist: &str) -> (String, String) {
-        let aa = if artist.is_empty() { "Artista desconhecido" } else { artist };
-        (album.to_string(), aa.to_string())
+    fn hash_for(&self, dir: &Path, covers: &CoverCache) -> Option<String> {
+        if let Some(h) = self.dirs.lock().unwrap().get(dir) {
+            return h.clone();
+        }
+        let h = folder_cover(dir).and_then(|f| std::fs::read(f).ok()).and_then(|b| covers.store(&b).ok());
+        self.dirs.lock().unwrap().insert(dir.to_path_buf(), h.clone());
+        h
     }
-    fn has(&self, album: &str, artist: &str) -> bool {
-        self.albums.lock().unwrap().contains(&Self::key(album, artist))
-    }
-    fn claim(&self, album: &str, artist: &str) -> bool {
-        self.albums.lock().unwrap().insert(Self::key(album, artist))
-    }
-    fn first_visit(&self, dir: &Path) -> bool {
-        self.dirs.lock().unwrap().insert(dir.to_path_buf())
-    }
+}
+
+/// The picture that stands for the record: the one tagged "front cover",
+/// else the first one (many taggers don't set a type).
+fn front_picture(t: &lofty::tag::Tag) -> Option<&lofty::picture::Picture> {
+    t.pictures()
+        .iter()
+        .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+        .or_else(|| t.pictures().first())
 }
 
 fn is_audio(p: &Path) -> bool {
@@ -119,7 +126,7 @@ fn parse_file(
     path: &Path,
     mtime: i64,
     size: i64,
-    claims: &CoverClaims,
+    folders: &FolderArt,
     covers: &CoverCache,
 ) -> Option<Parsed> {
     let tagged = lofty::read_from_path(path).ok()?;
@@ -164,6 +171,8 @@ fn parse_file(
             })
     });
 
+    let mut art: Option<String> = None;
+    let folder_art = path.parent().and_then(|d| folders.hash_for(d, covers));
     let (title, artist, album_artist, album, track_no, disc_no, year, tg, ag, picture, genre, composer) =
         match tag {
             Some(t) => {
@@ -173,27 +182,11 @@ fn parse_file(
                     .map(str::to_owned)
                     .unwrap_or_else(|| artist.clone());
                 let album_s = t.album().map(|s| s.into_owned()).unwrap_or_default();
-                // Only the first track *that has art* claims its album; the rest skip
-                // it, so at most one picture per album is ever decoded. Tracks without
-                // embedded art fall back to folder art, checked once per directory.
-                let picture = if album_s.is_empty() {
-                    // No album to share art with: the track keeps its own picture.
-                    t.pictures().first().and_then(|pic| covers.store(pic.data()).ok())
-                } else if !claims.has(&album_s, &album_artist) {
-                    let bytes = match t.pictures().first() {
-                        Some(pic) if claims.claim(&album_s, &album_artist) => Some(pic.data().to_vec()),
-                        Some(_) => None,
-                        None => path
-                            .parent()
-                            .filter(|d| claims.first_visit(d))
-                            .and_then(folder_cover)
-                            .filter(|_| claims.claim(&album_s, &album_artist))
-                            .and_then(|f| std::fs::read(f).ok()),
-                    };
-                    bytes.and_then(|b| covers.store(&b).ok())
-                } else {
-                    None
-                };
+                // Every file records its own picture (one decode per distinct
+                // image, the cache dedupes by hash); the album cover is voted
+                // afterwards from all of them, see db::pick_album_covers.
+                art = front_picture(t).and_then(|pic| covers.store(pic.data()).ok());
+                let picture = if album_s.is_empty() { art.clone() } else { None };
                 (
                     t.title().map(|s| s.into_owned()).unwrap_or(stem),
                     artist,
@@ -234,6 +227,8 @@ fn parse_file(
         track_gain: tg,
         album_gain: ag,
         cover_hash: picture,
+        art_hash: art,
+        folder_art,
         genre,
         composer,
         format,
@@ -243,19 +238,36 @@ fn parse_file(
     })
 }
 
-/// Look for folder art next to the file (cover.jpg, folder.png, ...).
+/// Look for folder art next to the file (cover.jpg, folder.png, ...). When
+/// several exist, the name order below decides, not the directory order.
 fn folder_cover(dir: &Path) -> Option<PathBuf> {
     const NAMES: &[&str] = &["cover", "folder", "front", "album"];
     let rd = std::fs::read_dir(dir).ok()?;
-    for e in rd.flatten() {
-        let p = e.path();
-        let stem = p.file_stem()?.to_string_lossy().to_ascii_lowercase();
-        let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
-        if NAMES.contains(&stem.as_str()) && matches!(ext.as_deref(), Some("jpg" | "jpeg" | "png")) {
-            return Some(p);
-        }
+    rd.flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            let stem = p.file_stem()?.to_string_lossy().to_ascii_lowercase();
+            let ext = p.extension()?.to_string_lossy().to_ascii_lowercase();
+            let rank = NAMES.iter().position(|n| *n == stem)?;
+            matches!(ext.as_str(), "jpg" | "jpeg" | "png").then_some((rank, p))
+        })
+        .min()
+        .map(|(_, p)| p)
+}
+
+/// "root" with a trailing separator, so /music doesn't match /music2.
+fn root_prefix(root: &Path) -> String {
+    let mut s = root.to_string_lossy().into_owned();
+    if !s.ends_with(std::path::MAIN_SEPARATOR) {
+        s.push(std::path::MAIN_SEPARATOR);
     }
-    None
+    s
+}
+
+/// A music folder that can be read right now and isn't an empty mount point
+/// (a locked or unplugged external disk leaves either nothing or an empty dir).
+pub fn root_available(root: &Path) -> bool {
+    std::fs::read_dir(root).map(|mut it| it.next().is_some()).unwrap_or(false)
 }
 
 pub fn scan(
@@ -271,18 +283,33 @@ pub fn scan(
 
     // 1. Walk (cheap: stat only).
     let mut found: Vec<(PathBuf, i64, i64)> = Vec::new();
+    // Roots we could not read completely (locked or unplugged external disk,
+    // unmounted mount point, I/O errors): their tracks are kept as they are.
+    let mut unreliable: Vec<String> = Vec::new();
     for root in roots {
+        let before = found.len();
+        let mut errors = false;
         for e in WalkDir::new(root)
             .follow_links(true)
             .into_iter()
             .filter_entry(|e| e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.'))
-            .flatten()
         {
+            let e = match e {
+                Ok(e) => e,
+                Err(_) => {
+                    errors = true;
+                    continue;
+                }
+            };
             if e.file_type().is_file() && is_audio(e.path()) {
                 if let Some((m, s)) = file_sig(e.path()) {
                     found.push((e.into_path(), m, s));
                 }
             }
+        }
+        if errors || found.len() == before {
+            log::info!("{} unavailable or empty: keeping its tracks", root.display());
+            unreliable.push(root_prefix(root));
         }
     }
     stats.seen = found.len();
@@ -297,26 +324,17 @@ pub fn scan(
         .collect();
     stats.unchanged = stats.seen - to_parse.len();
 
-    // Albums that already have a thumbnail: no need to pull picture bytes again.
-    let albums_with_cover: HashSet<(String, String)> = {
-        let mut st = db.conn.prepare(
-            "SELECT a.title, ar.name FROM albums a JOIN artists ar ON ar.id = a.artist_id WHERE a.cover_hash IS NOT NULL",
-        )?;
-        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        rows.flatten().collect()
-    };
-
     // 2. Parse in parallel, write in batches from this thread.
     let total = to_parse.len();
     let (tx, rx) = crossbeam_channel::bounded::<Option<Parsed>>(64);
-    let claims = CoverClaims::new(albums_with_cover);
+    let folders = FolderArt::new();
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
 
     std::thread::scope(|s| -> Result<()> {
-        let claims = &claims;
+        let folders = &folders;
         s.spawn(move || {
             to_parse.par_iter().for_each_with(tx, |tx, (p, m, sz)| {
-                let parsed = parse_file(p, *m, *sz, claims, covers);
+                let parsed = parse_file(p, *m, *sz, folders, covers);
                 let _ = tx.send(parsed);
             });
         });
@@ -334,7 +352,7 @@ pub fn scan(
             };
             stats.parsed += 1;
 
-            let cover_written = crate::db::upsert_track(
+            crate::db::upsert_track(
                 &txn,
                 &crate::db::NewTrack {
                     path: &p.path,
@@ -358,12 +376,11 @@ pub fn scan(
                     bit_depth: p.bit_depth,
                     bitrate: p.bitrate,
                     explicit: p.explicit,
+                    art_hash: p.art_hash.as_deref(),
+                    folder_art: p.folder_art.as_deref(),
                 },
                 now,
             )?;
-            if cover_written {
-                stats.covers_written += 1;
-            }
 
             if done % 250 == 0 {
                 on_event(ScanEvent::Parsed { done, total });
@@ -377,8 +394,13 @@ pub fn scan(
 
         // 3. Remove local tracks whose files are gone (remote tracks belong to their server's sync).
         stats.removed = crate::db::delete_tracks_where(&txn, |path| {
-            !path.starts_with(crate::remote::PREFIX) && !seen_paths.contains(path)
+            !path.starts_with(crate::remote::PREFIX)
+                && !seen_paths.contains(path)
+                && !unreliable.iter().any(|r| path.starts_with(r.as_str()))
         })?;
+        if stats.parsed > 0 || stats.removed > 0 {
+            stats.covers_written = crate::db::pick_album_covers(&txn)?;
+        }
         txn.commit()?;
         Ok(())
     })?;
@@ -386,4 +408,149 @@ pub fn scan(
     stats.elapsed_ms = t0.elapsed().as_millis();
     on_event(ScanEvent::Finished(stats.clone()));
     Ok(stats)
+}
+
+#[cfg(test)]
+mod unavailable_tests {
+    use super::*;
+
+    pub(super) fn wav(path: &Path) {
+        let samples = 8000u32;
+        let mut b = Vec::new();
+        b.extend_from_slice(b"RIFF");
+        b.extend_from_slice(&(36 + samples * 2).to_le_bytes());
+        b.extend_from_slice(b"WAVEfmt ");
+        b.extend_from_slice(&16u32.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&8000u32.to_le_bytes());
+        b.extend_from_slice(&16000u32.to_le_bytes());
+        b.extend_from_slice(&2u16.to_le_bytes());
+        b.extend_from_slice(&16u16.to_le_bytes());
+        b.extend_from_slice(b"data");
+        b.extend_from_slice(&(samples * 2).to_le_bytes());
+        b.resize(b.len() + samples as usize * 2, 0);
+        std::fs::write(path, b).unwrap();
+    }
+
+    #[test]
+    fn locked_disk_keeps_tracks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let music = tmp.path().join("hd");
+        std::fs::create_dir_all(music.join("Album")).unwrap();
+        wav(&music.join("Album/a.wav"));
+        wav(&music.join("Album/b.wav"));
+        let mut db = Db::open(&tmp.path().join("db.sqlite")).unwrap();
+        let covers = CoverCache::new(tmp.path().join("covers")).unwrap();
+        let roots = vec![music.clone()];
+        scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(db.counts().unwrap().0, 2);
+
+        // Disk locked: the mount point is empty, then gone entirely.
+        std::fs::rename(&music, tmp.path().join("away")).unwrap();
+        std::fs::create_dir_all(&music).unwrap();
+        let s = scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(s.removed, 0);
+        std::fs::remove_dir(&music).unwrap();
+        let s = scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(s.removed, 0);
+        assert_eq!(db.counts().unwrap().0, 2);
+        assert!(!root_available(&music));
+
+        // Back, minus one song: that one goes.
+        std::fs::rename(tmp.path().join("away"), &music).unwrap();
+        std::fs::remove_file(music.join("Album/b.wav")).unwrap();
+        assert!(root_available(&music));
+        let s = scan(&mut db, &covers, &roots, |_| {}).unwrap();
+        assert_eq!(s.removed, 1);
+    }
+}
+
+#[cfg(test)]
+mod cover_vote_tests {
+    use super::*;
+    use lofty::config::WriteOptions;
+    use lofty::picture::{MimeType, Picture, PictureType};
+    use lofty::tag::{Tag, TagExt, TagType};
+
+    fn png(rgb: [u8; 3]) -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(8, 8, image::Rgb(rgb));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    fn song(path: &Path, album: &str, artist: &str, title: &str, pics: &[(PictureType, &[u8])]) {
+        super::unavailable_tests::wav(path);
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.set_album(album.into());
+        tag.set_artist(artist.into());
+        tag.set_title(title.into());
+        for (ty, data) in pics {
+            tag.push_picture(Picture::new_unchecked(*ty, Some(MimeType::Png), None, data.to_vec()));
+        }
+        tag.save_to_path(path, WriteOptions::default()).unwrap();
+    }
+
+    fn album_cover(db: &Db, title: &str) -> Option<String> {
+        db.conn.query_row("SELECT cover_hash FROM albums WHERE title=?1", [title], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn majority_beats_a_few_wrong_pictures() {
+        let tmp = tempfile::tempdir().unwrap();
+        let music = tmp.path().join("m");
+        let right = png([200, 30, 30]);
+        let wrong = png([30, 30, 200]);
+        let back = png([30, 200, 30]);
+        // The lossless copies (right art) and a few MP3-ish copies whose tag
+        // carries another record's art, in their own folder with a stray
+        // cover.jpg next to files of another album.
+        std::fs::create_dir_all(music.join("CBJR/La Familia 013")).unwrap();
+        std::fs::create_dir_all(music.join("Downloads")).unwrap();
+        for i in 0..5 {
+            song(&music.join(format!("CBJR/La Familia 013/{i}.wav")), "La Familia 013", "Charlie Brown Jr.", &format!("s{i}"),
+                // a back cover listed first must not win over the front
+                &[(PictureType::CoverBack, &back), (PictureType::CoverFront, &right)]);
+        }
+        for i in 0..2 {
+            song(&music.join(format!("Downloads/{i}.wav")), "La Familia 013", "Charlie Brown Jr.", &format!("d{i}"),
+                &[(PictureType::CoverFront, &wrong)]);
+        }
+        song(&music.join("Downloads/x.wav"), "Room on Fire", "The Strokes", "x", &[]);
+        std::fs::write(music.join("Downloads/cover.png"), &wrong).unwrap();
+
+        let mut db = Db::open(&tmp.path().join("db.sqlite")).unwrap();
+        let covers = CoverCache::new(tmp.path().join("covers")).unwrap();
+        scan(&mut db, &covers, &[music.clone()], |_| {}).unwrap();
+
+        let right_h = blake3::hash(&right).to_hex()[..32].to_string();
+        let wrong_h = blake3::hash(&wrong).to_hex()[..32].to_string();
+        assert_eq!(album_cover(&db, "La Familia 013").as_deref(), Some(right_h.as_str()));
+        // The other album has no art of its own: the shared folder's image is its only option.
+        assert_eq!(album_cover(&db, "Room on Fire").as_deref(), Some(wrong_h.as_str()));
+
+        // A cover the user picked by hand survives rescans.
+        db.conn.execute("UPDATE albums SET cover_hash='mine', cover_user=1 WHERE title='La Familia 013'", []).unwrap();
+        db.conn.execute("UPDATE tracks SET mtime=0", []).unwrap();
+        scan(&mut db, &covers, &[music.clone()], |_| {}).unwrap();
+        assert_eq!(album_cover(&db, "La Familia 013").as_deref(), Some("mine"));
+    }
+
+    #[test]
+    fn album_folder_art_wins_a_tie() {
+        let tmp = tempfile::tempdir().unwrap();
+        let music = tmp.path().join("m");
+        let folder = png([10, 10, 10]);
+        let tagged = png([250, 250, 250]);
+        std::fs::create_dir_all(music.join("A")).unwrap();
+        song(&music.join("A/1.wav"), "Alb", "Art", "1", &[(PictureType::CoverFront, &tagged)]);
+        song(&music.join("A/2.wav"), "Alb", "Art", "2", &[]);
+        std::fs::write(music.join("A/folder.png"), &folder).unwrap();
+        let mut db = Db::open(&tmp.path().join("db.sqlite")).unwrap();
+        let covers = CoverCache::new(tmp.path().join("covers")).unwrap();
+        scan(&mut db, &covers, &[music], |_| {}).unwrap();
+        let h = blake3::hash(&folder).to_hex()[..32].to_string();
+        assert_eq!(album_cover(&db, "Alb").as_deref(), Some(h.as_str()));
+    }
 }

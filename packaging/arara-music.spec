@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.9
+Version:        0.7.21
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -43,6 +43,79 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.21-1
+- Versão única que junta tudo desde a 0.7.12: editar informações da música
+  (0.7.13), sem Música livre (0.7.14), sombra da capa (0.7.15), links e
+  botão anterior na tela da letra (0.7.17), Reproduzir/Aleatório na busca e
+  em todas as músicas (0.7.19) e a página Início (0.7.20)
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.20-1
+- Nova página Início, primeira da barra lateral e aberta ao iniciar: botão
+  grande "Tocar tudo aleatório" (e "Favoritas aleatórias"), álbuns ouvidos
+  recentemente, mais tocadas, adicionados recentemente, seus artistas,
+  tocadas recentemente e álbuns para redescobrir. Carrega depois que a
+  janela aparece, com uma só consulta ao banco.
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.19-1
+- Resultados da busca e "Todas as músicas" ganharam os botões "Reproduzir" e
+  "Aleatório", como as páginas de álbum e de categoria
+- "Aleatório" sorteia entre todas as músicas da lista, não só as 500
+  primeiras
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.17-1
+- Tela da letra: artista e álbum viraram links (abrem a página do artista e
+  do álbum), como no painel lateral.
+- Botão anterior: o segundo toque logo depois de voltar ao início vai para a
+  música anterior, mesmo se o reprodutor ainda informa a posição antiga; os
+  3 segundos contam a partir do início real da faixa (intro cortada); e ao
+  tocar uma música de outra lista, o anterior volta para o que tocava antes.
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.15-1
+- Sombra da capa no painel do player igual à do visual Apple: macia,
+  desfocada e um pouco abaixo da capa, sem os anéis escuros em volta
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.14-1
+- Removida a Música livre (Jamendo e Internet Archive): sai da barra
+  lateral, a página, a chave do Jamendo e os downloads. As músicas já
+  baixadas continuam na biblioteca como arquivos locais comuns.
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.13-1
+- Editar informações da música (menu ⋮ ou lápis na página Informações):
+  título, artista, álbum, artista do álbum, faixa, disco, ano, gênero,
+  composição e capa
+- Arquivos locais: as etiquetas são gravadas no próprio arquivo (por uma cópia
+  que substitui o original, sem cortar a música que está tocando). Dá para
+  escolher guardar só no Arara Music; músicas de servidor e discos sem
+  permissão de gravação ficam assim automaticamente, e a mudança continua
+  valendo depois de reindexar ou sincronizar ("Desfazer" volta ao original)
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.12-1
+- Capas de álbum certas: a capa é escolhida pela imagem que a maioria das
+  faixas usa (capa frontal embutida e cover.jpg da pasta do álbum), em vez da
+  primeira faixa lida. Algumas faixas com a imagem de outro disco, ou um
+  cover.jpg numa pasta misturada (ex.: Downloads), não trocam mais a capa
+- Na primeira abertura os arquivos são relidos uma vez para refazer as capas
+- Página do álbum: botão ⋯ (ou clique direito na capa) com "Procurar a capa
+  de novo" e "Escolher imagem da capa…"; Preferências > Biblioteca ganhou
+  "Refazer capas"
+- Informações online (MusicBrainz) só aceitam resultado com o mesmo título e
+  o mesmo artista; as respostas antigas em cache são buscadas de novo
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.11-1
+- Gêneros do "Sobre o artista" e do álbum agora são clicáveis: abrem a
+  página "Similares" com artistas, álbuns e músicas daquele gênero (pastas
+  locais e servidores) e artistas para descobrir no MusicBrainz
+- Página do artista no mesmo formato da página do álbum: foto, nome e
+  "Sobre o artista" fixos à esquerda, álbuns à direita
+
+* Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.10-1
+- Biblioteca em HD externo: o app não trava mais quando o disco está
+  bloqueado, desconectado ou acabou de ser desbloqueado (as pastas são
+  vigiadas fora da interface)
+- Com o disco bloqueado, as músicas continuam na biblioteca em vez de sumir
+- Aviso no topo com o botão "Abrir no Arquivos" para desbloquear; ao
+  desbloquear, o Arara percebe sozinho e atualiza a biblioteca
+
 * Sat Nov 07 2026 Arara Music <noreply@anthropic.com> - 0.7.9-1
 - Corrige o app que ficava rodando sem abrir a janela: a janela aparece antes
   de varrer a biblioteca, falar com o GNOME (MPRIS, tema, inibir suspensão) e

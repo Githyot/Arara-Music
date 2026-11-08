@@ -25,6 +25,8 @@ pub mod qobject {
         #[qproperty(QString, accent)]
         #[qproperty(bool, syncing)]
         #[qproperty(QString, lyrics_progress, cxx_name = "lyricsProgress")]
+        /// JSON list of music folders that can't be read now (locked/unplugged disk).
+        #[qproperty(QString, missing_dirs, cxx_name = "missingDirs")]
         type Library = super::LibraryRust;
 
         /// Opens the cached index (instant), starts a background rescan,
@@ -43,12 +45,33 @@ pub mod qobject {
         fn heartbeat(self: &Library, what: &QString);
 
         #[qinvokable]
+        #[cxx_name = "openMissingDir"]
+        fn open_missing_dir(self: &Library, dir: &QString);
+
+        #[qinvokable]
         #[cxx_name = "startScan"]
         fn start_scan(self: Pin<&mut Library>, dir: &QString);
 
         #[qinvokable]
         #[cxx_name = "albumsJson"]
         fn albums_json(self: &Library) -> QString;
+
+        /// Forget a hand-picked cover and re-read this album's files, so its
+        /// cover is chosen again from the embedded art and folder images.
+        #[qinvokable]
+        #[cxx_name = "refreshAlbumCover"]
+        fn refresh_album_cover(self: Pin<&mut Library>, album_id: i64);
+
+        /// Use an image file (path or file:// URL) as this album's cover.
+        #[qinvokable]
+        #[cxx_name = "setAlbumCover"]
+        fn set_album_cover(self: Pin<&mut Library>, album_id: i64, image: &QString);
+
+        /// Re-read every local file and choose every album cover again
+        /// (hand-picked covers are kept).
+        #[qinvokable]
+        #[cxx_name = "rebuildCovers"]
+        fn rebuild_covers(self: Pin<&mut Library>);
 
         #[qinvokable]
         #[cxx_name = "albumTracksJson"]
@@ -97,6 +120,16 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "mostPlayedJson"]
         fn most_played_json(self: &Library) -> QString;
+
+        /// Everything the home page ("Início") shows, in one call.
+        #[qinvokable]
+        #[cxx_name = "homeJson"]
+        fn home_json(self: &Library, seed: i64) -> QString;
+
+        /// Random songs for the home page's shuffle buttons: kind is "all" or "starred".
+        #[qinvokable]
+        #[cxx_name = "shuffleJson"]
+        fn shuffle_json(self: &Library, kind: &QString, count: i32) -> QString;
 
         /// Returns the new starred state.
         #[qinvokable]
@@ -376,6 +409,24 @@ pub mod qobject {
         #[cxx_name = "onlineInfo"]
         fn online_info(self: Pin<&mut Library>, kind: QString, id: i64, json: QString);
 
+        /// Library items sharing a genre/tag ("Similares" page): artists,
+        /// albums and songs, local and from synced servers. `exclude_artist`
+        /// (-1 = none) is the artist whose chip was clicked.
+        #[qinvokable]
+        #[cxx_name = "tagJson"]
+        fn tag_json(self: &Library, tag: &QString, exclude_artist: i64) -> QString;
+
+        /// Artists with this tag on MusicBrainz (cached); answers with `tagOnline`.
+        /// `area` ("Brazil") puts artists from there first.
+        #[qinvokable]
+        #[cxx_name = "requestTagOnline"]
+        fn request_tag_online(self: Pin<&mut Library>, tag: &QString, area: &QString);
+
+        /// `json` is null when the lookup is off or failed.
+        #[qsignal]
+        #[cxx_name = "tagOnline"]
+        fn tag_online(self: Pin<&mut Library>, tag: QString, json: QString);
+
         /// Open the folder holding a local track in the file manager, with the file selected when possible.
         #[qinvokable]
         #[cxx_name = "showInFolder"]
@@ -385,33 +436,32 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "lyricsText"]
         fn lyrics_text(self: &Library, track_id: i64) -> QString;
+        /// What the "Editar informações" dialog shows for one song (library data only).
+        #[qinvokable]
+        #[cxx_name = "editableJson"]
+        fn editable_json(self: &Library, track_id: i64) -> QString;
+
+        /// Save edited details (JSON with title, artist, albumArtist, album,
+        /// trackNo, discNo, year, genre, composer). `cover` is an image file
+        /// ("" keeps the picture). With `write_file`, local files get the tags
+        /// written into them. Runs in the background; answers with trackEdited.
+        #[qinvokable]
+        #[cxx_name = "saveTrackEdit"]
+        fn save_track_edit(self: Pin<&mut Library>, track_id: i64, json: &QString, cover: &QString, write_file: bool);
+
+        /// Drop changes kept only in the library; the song is read again from its file or server.
+        #[qinvokable]
+        #[cxx_name = "revertTrackEdit"]
+        fn revert_track_edit(self: Pin<&mut Library>, track_id: i64) -> bool;
+
+        /// `json`: {trackId, wroteFile, warning, error, track} (track = the song as the lists show it).
+        #[qsignal]
+        #[cxx_name = "trackEdited"]
+        fn track_edited(self: Pin<&mut Library>, track_id: i64, json: QString);
+
         #[qsignal]
         #[cxx_name = "analysisReady"]
         fn analysis_ready(self: Pin<&mut Library>, track_id: i64, json: QString);
-
-        /// Search Jamendo + Internet Archive (open licences only); answers with `freeResults`.
-        #[qinvokable]
-        #[cxx_name = "searchFree"]
-        fn search_free(self: Pin<&mut Library>, query: &QString);
-
-        /// `json`: array of tracks; `errors`: array of strings (a source that failed).
-        #[qsignal]
-        #[cxx_name = "freeResults"]
-        fn free_results(self: Pin<&mut Library>, query: QString, json: QString, errors: QString);
-
-        /// Download a free track (FreeTrack JSON) into the library, with its .lrc.
-        #[qinvokable]
-        #[cxx_name = "downloadFree"]
-        fn download_free(self: Pin<&mut Library>, track_json: &QString) -> bool;
-
-        #[qinvokable]
-        #[cxx_name = "cancelDownload"]
-        fn cancel_download(self: &Library, id: &QString);
-
-        /// kind: started | progress | done | here | failed | cancelled. `pct` -1 = unknown size.
-        #[qsignal]
-        #[cxx_name = "downloadEvent"]
-        fn download_event(self: Pin<&mut Library>, id: QString, kind: QString, pct: i32, message: QString);
 
         /// play, pause, playpause, stop, next, previous, seek (arg = µs offset),
         /// setposition (arg = µs), raise, quit
@@ -424,7 +474,7 @@ pub mod qobject {
 }
 
 use crate::desktop::{self, Command, Mpris, TrackMeta};
-use arara_core::{covers::CoverCache, db::Db, downloads, freemusic, import, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
+use arara_core::{covers::CoverCache, db::Db, import, lyrics, remote, scanner, watcher::LibraryWatcher, Paths};
 use core::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
@@ -441,6 +491,7 @@ pub struct LibraryRust {
     accent: QString,
     syncing: bool,
     lyrics_progress: QString,
+    missing_dirs: QString,
     prefetching: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: remote::Resolver,
     sync_queue: Vec<i64>,
@@ -448,10 +499,9 @@ pub struct LibraryRust {
     covers_dir: PathBuf,
     db: Option<Db>,
     rescan_pending: bool,
-    watcher: Option<LibraryWatcher>,
+    watch_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     mpris: Option<Mpris>,
     inhibit: Option<desktop::Inhibitor>,
-    downloads: Option<downloads::DownloadManager>,
 }
 
 impl Default for LibraryRust {
@@ -480,10 +530,10 @@ impl Default for LibraryRust {
             covers_dir: p.covers,
             db: None,
             rescan_pending: false,
-            watcher: None,
+            watch_gen: Default::default(),
+            missing_dirs: QString::from("[]"),
             mpris: None,
             inhibit: None,
-            downloads: None,
         }
     }
 }
@@ -602,16 +652,105 @@ impl qobject::Library {
         self.as_mut().watch_dirs(&dirs);
     }
 
-    fn watch_dirs(mut self: Pin<&mut Self>, dirs: &[String]) {
+    /// Watches the music folders from a helper thread. Nothing here touches the
+    /// disk on the UI thread: an external drive that is spinning up, locked or
+    /// half-mounted can block any file access for a long time. The thread also
+    /// notices when a folder goes away or comes back (disk unlocked in Files)
+    /// and rescans then.
+    fn watch_dirs(self: Pin<&mut Self>, dirs: &[String]) {
+        use std::sync::atomic::Ordering;
         let qt = self.qt_thread();
         let roots: Vec<PathBuf> = dirs.iter().map(PathBuf::from).collect();
-        let w = LibraryWatcher::new(&roots, std::time::Duration::from_secs(2), move || {
-            let _ = qt.queue(|o| o.rescan());
+        let gen_ref = self.watch_gen.clone();
+        let gen = gen_ref.fetch_add(1, Ordering::SeqCst) + 1;
+        let db_path = self.db_path.clone();
+        let _ = std::thread::Builder::new().name("arara-folders".into()).spawn(move || {
+            // Folders that have songs in the index: if one of them is empty now,
+            // it's an unmounted disk, not a new empty folder.
+            let known: Vec<bool> = {
+                let db = Db::open(&db_path).ok();
+                roots
+                    .iter()
+                    .map(|r| {
+                        let mut prefix = r.to_string_lossy().into_owned();
+                        if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
+                            prefix.push(std::path::MAIN_SEPARATOR);
+                        }
+                        db.as_ref()
+                            .and_then(|d| {
+                                d.conn
+                                    .query_row(
+                                        "SELECT 1 FROM tracks WHERE substr(path, 1, length(?1)) = ?1 LIMIT 1",
+                                        [&prefix],
+                                        |_| Ok(()),
+                                    )
+                                    .ok()
+                            })
+                            .is_some()
+                    })
+                    .collect()
+            };
+            let mut prev: Option<Vec<bool>> = None;
+            let mut watcher: Option<LibraryWatcher> = None;
+            while gen_ref.load(Ordering::SeqCst) == gen {
+                let now: Vec<bool> = roots
+                    .iter()
+                    .zip(&known)
+                    .map(|(r, k)| scanner::root_available(r) || (!k && r.is_dir()))
+                    .collect();
+                if prev.as_ref() != Some(&now) {
+                    let came_back = prev.as_ref().map(|p| p.iter().zip(&now).any(|(a, b)| !a && *b)).unwrap_or(false);
+                    let ok: Vec<PathBuf> = roots.iter().zip(&now).filter(|(_, a)| **a).map(|(r, _)| r.clone()).collect();
+                    let missing: Vec<String> =
+                        roots.iter().zip(&now).filter(|(_, a)| !**a).map(|(r, _)| r.to_string_lossy().into_owned()).collect();
+                    watcher = None;
+                    let q = qt.clone();
+                    match LibraryWatcher::new(&ok, std::time::Duration::from_secs(2), move || {
+                        let _ = q.queue(|o| o.rescan());
+                    }) {
+                        Ok(w) => watcher = Some(w),
+                        Err(e) => log::warn!("folder watching unavailable: {e}"),
+                    }
+                    let json = serde_json::to_string(&missing).unwrap();
+                    let _ = qt.queue(move |mut o| {
+                        o.as_mut().set_missing_dirs(qs(&json));
+                        if came_back {
+                            o.as_mut().rescan();
+                        }
+                    });
+                    prev = Some(now);
+                }
+                for _ in 0..16 {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    if gen_ref.load(Ordering::SeqCst) != gen {
+                        break;
+                    }
+                }
+            }
+            drop(watcher);
         });
-        match w {
-            Ok(w) => self.as_mut().rust_mut().watcher = Some(w),
-            Err(e) => log::warn!("folder watching unavailable: {e}"),
-        }
+    }
+
+    /// Opens the file manager where the missing folder should be, so the user
+    /// can unlock or mount the disk there (GNOME asks for the password).
+    pub fn open_missing_dir(&self, dir: &QString) {
+        let dir = PathBuf::from(dir.to_string());
+        std::thread::spawn(move || {
+            let mut p = dir.as_path();
+            while !p.is_dir() {
+                match p.parent() {
+                    Some(q) => p = q,
+                    None => break,
+                }
+            }
+            let target = p.to_path_buf();
+            #[cfg(not(windows))]
+            let _ = std::process::Command::new("gio").arg("open").arg(&target).spawn().or_else(|_| {
+                std::process::Command::new("xdg-open").arg(&target).spawn()
+            });
+            #[cfg(windows)]
+            let _ = std::process::Command::new("explorer").arg(&target).spawn();
+        });
     }
 
     fn rescan(mut self: Pin<&mut Self>) {
@@ -838,6 +977,57 @@ impl qobject::Library {
         qs(&serde_json::to_string(&v).unwrap())
     }
 
+    /// Runs `work` on a fresh connection off the UI thread (it may wait on the
+    /// scanner's write lock), then `after` back on the UI thread.
+    fn db_job(
+        &self,
+        work: impl FnOnce(&Db) -> arara_core::Result<()> + Send + 'static,
+        after: impl FnOnce(Pin<&mut qobject::Library>) + Send + 'static,
+    ) {
+        let qt = self.qt_thread();
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            let ok = Db::open(&db_path).and_then(|db| work(&db));
+            match ok {
+                Ok(()) => {
+                    let _ = qt.queue(after);
+                }
+                Err(e) => log::warn!("cover job failed: {e}"),
+            }
+        });
+    }
+
+    pub fn refresh_album_cover(self: Pin<&mut Self>, album_id: i64) {
+        self.db_job(
+            move |db| {
+                db.reread_album_cover(album_id)
+            },
+            |o| o.rescan(),
+        );
+    }
+
+    pub fn set_album_cover(self: Pin<&mut Self>, album_id: i64, image: &QString) {
+        let path = remote::url_to_path(&image.to_string());
+        let covers_dir = self.covers_dir.clone();
+        self.db_job(
+            move |db| {
+                let bytes = std::fs::read(&path)?;
+                let hash = CoverCache::new(&covers_dir)?.store(&bytes)?;
+                db.set_user_cover(album_id, &hash)
+            },
+            |o| o.library_changed(),
+        );
+    }
+
+    pub fn rebuild_covers(self: Pin<&mut Self>) {
+        self.db_job(
+            |db| {
+                db.reread_all_covers()
+            },
+            |o| o.rescan(),
+        );
+    }
+
     pub fn albums_json(&self) -> QString {
         let Some(db) = &self.db else { return qs("[]") };
         let v: Vec<_> = db.albums().unwrap_or_default().iter().map(|a| self.album_value(a)).collect();
@@ -920,6 +1110,43 @@ impl qobject::Library {
     pub fn most_played_json(&self) -> QString {
         let Some(db) = &self.db else { return qs("[]") };
         self.tracks_to_json(db.most_played(50))
+    }
+
+    pub fn home_json(&self, seed: i64) -> QString {
+        let Some(db) = &self.db else { return qs("{}") };
+        let albums = |r: arara_core::Result<Vec<arara_core::db::AlbumRow>>| -> Vec<serde_json::Value> {
+            r.unwrap_or_default().iter().map(|a| self.album_value(a)).collect()
+        };
+        let tracks = |r: arara_core::Result<Vec<arara_core::db::TrackRow>>| -> Vec<serde_json::Value> {
+            r.unwrap_or_default().iter().map(|t| self.track_value(t)).collect()
+        };
+        let artists: Vec<_> = db
+            .top_artists(12)
+            .unwrap_or_default()
+            .iter()
+            .map(|a| json!({ "id": a.id, "name": a.name, "albums": a.album_count, "cover": self.cover(&a.cover_hash, 256) }))
+            .collect();
+        let starred = db.random_starred(1).map(|v| !v.is_empty()).unwrap_or(false);
+        let v = json!({
+            "recentAlbums": albums(db.recent_albums(12)),
+            "addedAlbums": albums(db.added_albums(12)),
+            "rediscover": albums(db.rediscover_albums(30, now(), seed, 12)),
+            "topArtists": artists,
+            "topTracks": tracks(db.most_played(10)),
+            "recentTracks": tracks(db.recent_tracks(10)),
+            "hasStarred": starred,
+        });
+        qs(&v.to_string())
+    }
+
+    pub fn shuffle_json(&self, kind: &QString, count: i32) -> QString {
+        let Some(db) = &self.db else { return qs("[]") };
+        let n = count.clamp(1, 2000) as i64;
+        if kind.to_string() == "starred" {
+            self.tracks_to_json(db.random_starred(n))
+        } else {
+            self.tracks_to_json(db.random_tracks(n))
+        }
     }
 
     pub fn set_starred(self: Pin<&mut Self>, track_id: i64, starred: bool) -> bool {
@@ -1142,6 +1369,7 @@ impl qobject::Library {
         } else {
             String::new()
         });
+        v["edited"] = json!(arara_core::edit::override_for(&db.conn, &t.path).ok().flatten().is_some());
         v["hasLyrics"] = json!(db.cached_lyrics(track_id).ok().flatten().map(|(src, a, b)| src != "none" && (a.is_some() || b.is_some())).unwrap_or(false));
         v["file"] = if local { arara_core::info::file_details(&t.path) } else { json!({}) };
         qs(&v.to_string())
@@ -1312,6 +1540,115 @@ impl qobject::Library {
             let s = data.to_string();
             let _ = qt.queue(move |o| o.online_info(qs(&kind), id, qs(&s)));
         });
+    }
+
+    pub fn tag_json(&self, tag: &QString, exclude_artist: i64) -> QString {
+        let Some(db) = &self.db else { return qs("null") };
+        let tag = tag.to_string();
+        let exclude = (exclude_artist >= 0).then_some(exclude_artist);
+        let Ok(m) = arara_core::similar::matches(db, &tag, exclude, 200) else { return qs("null") };
+        let artists = db.artists().unwrap_or_default();
+        let albums = db.albums().unwrap_or_default();
+        let artist_v: Vec<_> = m.artists.iter().filter_map(|(id, _)| artists.iter().find(|a| a.id == *id))
+            .take(30)
+            .map(|a| json!({ "id": a.id, "name": a.name, "albums": a.album_count, "cover": self.cover(&a.cover_hash, 256) }))
+            .collect();
+        let album_v: Vec<_> = m.albums.iter().filter_map(|(id, _)| albums.iter().find(|a| a.id == *id)).take(30).map(|a| self.album_value(a)).collect();
+        let mut tracks = db.tracks_by_ids(&m.tracks).unwrap_or_default();
+        tracks.sort_by_key(|t| m.tracks.iter().position(|i| *i == t.id));
+        let v = json!({
+            "tag": tag,
+            "artists": artist_v, "artistTotal": m.artists.len(),
+            "albums": album_v, "albumTotal": m.albums.len(),
+            "tracks": tracks.iter().map(|t| self.track_value(t)).collect::<Vec<_>>(), "trackTotal": m.track_total,
+        });
+        qs(&v.to_string())
+    }
+
+    pub fn request_tag_online(self: Pin<&mut Self>, tag: &QString, area: &QString) {
+        let tag = tag.to_string();
+        let area = area.to_string();
+        let qt = self.qt_thread();
+        if !self.online_allowed() || tag.trim().is_empty() {
+            let _ = qt.queue(move |o| o.tag_online(qs(&tag), qs("null")));
+            return;
+        }
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            let Ok(db) = Db::open(&db_path) else { return };
+            let key = format!("{tag}\u{1f}{area}");
+            let data = arara_core::info::cached_or_fetch(&db, "tag", &key, now(), false, || {
+                arara_core::similar::fetch_tag_artists(&tag, Some(&area))
+            });
+            let s = data.to_string();
+            let _ = qt.queue(move |o| o.tag_online(qs(&tag), qs(&s)));
+        });
+    }
+
+    // ---------- editing a song ----------
+
+    pub fn editable_json(&self, track_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("null") };
+        let Ok(Some(f)) = arara_core::edit::fields(db, track_id) else { return qs("null") };
+        let mut v = serde_json::to_value(&f).unwrap_or(json!(null));
+        v["cover"] = json!(self.cover(&f.cover_hash, 640));
+        qs(&v.to_string())
+    }
+
+    pub fn save_track_edit(self: Pin<&mut Self>, track_id: i64, json: &QString, cover: &QString, write_file: bool) {
+        let qt = self.qt_thread();
+        let edit: arara_core::edit::TrackEdit = match serde_json::from_str(&json.to_string()) {
+            Ok(e) => e,
+            Err(e) => {
+                let msg = json!({ "trackId": track_id, "error": format!("dados inválidos: {e}") }).to_string();
+                let _ = qt.queue(move |o| o.track_edited(track_id, qs(&msg)));
+                return;
+            }
+        };
+        let cover = cover.to_string();
+        let cover = (!cover.is_empty()).then(|| remote::url_to_path(&cover));
+        let (db_path, covers_dir) = (self.db_path.clone(), self.covers_dir.clone());
+        // Files may sit on a slow or locked disk: never touch them on the UI thread.
+        std::thread::spawn(move || {
+            let res = (|| -> Result<arara_core::edit::EditOutcome, String> {
+                let db = Db::open(&db_path).map_err(|e| e.to_string())?;
+                let covers = CoverCache::new(&covers_dir).map_err(|e| e.to_string())?;
+                let bytes = match &cover {
+                    Some(p) => {
+                        Some(std::fs::read(p).map_err(|e| format!("não foi possível abrir a imagem: {e}"))?)
+                    }
+                    None => None,
+                };
+                arara_core::edit::apply(&db, &covers, track_id, edit, bytes, write_file).map_err(|e| match e {
+                    arara_core::Error::Image(_) => "o arquivo escolhido não é uma imagem".to_string(),
+                    e => e.to_string(),
+                })
+            })();
+            let _ = qt.queue(move |mut o| {
+                let mut v = match res {
+                    Ok(out) => serde_json::to_value(&out).unwrap_or(json!({})),
+                    Err(e) => json!({ "trackId": track_id, "error": e }),
+                };
+                if v.get("error").is_none() {
+                    o.as_mut().refresh_counts();
+                    o.as_mut().library_changed();
+                    o.as_mut().playlists_changed();
+                }
+                let track = o.db.as_ref().and_then(|d| d.track(track_id).ok().flatten()).map(|t| o.track_value(&t));
+                v["track"] = track.unwrap_or(json!(null));
+                o.as_mut().track_edited(track_id, qs(&v.to_string()));
+            });
+        });
+    }
+
+    pub fn revert_track_edit(mut self: Pin<&mut Self>, track_id: i64) -> bool {
+        let Some(db) = &self.db else { return false };
+        let undone = arara_core::edit::revert(db, track_id).unwrap_or(false);
+        if undone {
+            // Local: re-read the file now. Server songs come back on the next sync.
+            self.as_mut().rescan();
+        }
+        undone
     }
 
     pub fn show_in_folder(&self, track_id: i64) -> bool {
@@ -1640,7 +1977,14 @@ impl qobject::Library {
         let (purpose, title) = (purpose.to_string(), title.to_string());
         std::thread::spawn(move || {
             const EXPORTS: &[&str] = &["*.xml", "*.csv", "*.json", "*.m3u", "*.m3u8", "*.xspf"];
-            let filters: &[(&str, &[&str])] = if directory { &[] } else { &[("Exportações de playlists", EXPORTS), ("Todos os arquivos", &["*"])] };
+            const IMAGES: &[&str] = &["*.jpg", "*.jpeg", "*.png", "*.webp", "*.JPG", "*.JPEG", "*.PNG"];
+            let filters: &[(&str, &[&str])] = if directory {
+                &[]
+            } else if purpose.starts_with("cover:") || purpose == "trackcover" {
+                &[("Imagens", IMAGES), ("Todos os arquivos", &["*"])]
+            } else {
+                &[("Exportações de playlists", EXPORTS), ("Todos os arquivos", &["*"])]
+            };
             let res = desktop::portal_pick(&title, directory, filters);
             let _ = qt.queue(move |mut o| match res {
                 Ok(Some(p)) => o.as_mut().path_picked(qs(&purpose), qs(&p)),
@@ -1656,74 +2000,6 @@ impl qobject::Library {
 
 // ---------- background lyrics download ----------
 impl qobject::Library {
-    pub fn search_free(self: Pin<&mut Self>, query: &QString) {
-        let q = query.to_string();
-        let key = self.db.as_ref().and_then(|d| d.get_kv("pref:jamendo").ok().flatten()).or_else(|| std::env::var("ARARA_JAMENDO_CLIENT_ID").ok());
-        let qt = self.qt_thread();
-        std::thread::spawn(move || {
-            let (tracks, errors) = freemusic::FreeMusic::default().search(&q, key.as_deref());
-            let json = serde_json::to_string(&tracks).unwrap_or_else(|_| "[]".into());
-            let errs = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".into());
-            let _ = qt.queue(move |o| o.free_results(qs(&q), qs(&json), qs(&errs)));
-        });
-    }
-
-    pub fn download_free(mut self: Pin<&mut Self>, track_json: &QString) -> bool {
-        let Ok(t) = serde_json::from_str::<serde_json::Value>(&track_json.to_string()) else { return false };
-        let g = |k: &str| t[k].as_str().unwrap_or("").to_string();
-        if g("download_url").is_empty() {
-            return false;
-        }
-        if self.downloads.is_none() {
-            let qt = self.qt_thread();
-            let workers = self.db.as_ref()
-                .and_then(|d| d.get_kv("pref:dlworkers").ok().flatten())
-                .and_then(|v| v.parse::<f64>().ok())
-                .map(|n| n.clamp(1.0, 4.0) as usize)
-                .unwrap_or(2);
-            let mgr = downloads::DownloadManager::new(workers, move |ev| {
-                use downloads::DownloadEvent as E;
-                let (id, kind, pct, msg) = match ev {
-                    E::Started { id } => (id, "started", 0, String::new()),
-                    E::Progress { id, done, total } => (id, "progress", if total > 0 { (done * 100 / total) as i32 } else { -1 }, String::new()),
-                    E::AlreadyHere { id, path } => (id, "here", 100, path.display().to_string()),
-                    E::Finished { id, path, lyrics } => (id, "done", 100, format!("{}{}", path.display(), if lyrics { "|lrc" } else { "" })),
-                    E::Failed { id, error } => (id, "failed", 0, error),
-                    E::Cancelled { id } => (id, "cancelled", 0, String::new()),
-                };
-                let finished = kind == "done";
-                let _ = qt.queue(move |mut o| {
-                    o.as_mut().download_event(qs(&id), qs(kind), pct, qs(&msg));
-                    // the new file is in a watched folder; index it now so it shows up at once
-                    if finished {
-                        o.as_mut().rescan();
-                    }
-                });
-            });
-            self.as_mut().rust_mut().downloads = Some(mgr);
-        }
-        let root = PathBuf::from(self.library_dir.to_string()).join("Música livre");
-        let dest = downloads::library_path(&root, &g("artist"), &g("album"), &g("title"), &g("ext"));
-        let task = downloads::DownloadTask {
-            id: g("id"),
-            url: g("download_url"),
-            dest,
-            artist: g("artist"),
-            title: g("title"),
-            album: g("album"),
-            duration_s: t["duration_ms"].as_u64().unwrap_or(0) / 1000,
-            lyrics: std::env::var("ARARA_OFFLINE").is_err(),
-            comment: format!("{} · {} · {}", g("license"), g("source"), g("page_url")),
-        };
-        self.downloads.as_ref().map(|m| m.enqueue(task)).unwrap_or(false)
-    }
-
-    pub fn cancel_download(&self, id: &QString) {
-        if let Some(m) = &self.downloads {
-            m.cancel(&id.to_string());
-        }
-    }
-
     /// After indexing: look up lyrics (sidecar, tags, LRCLIB) for every track that has none yet,
     /// most-played first, two requests at a time. One run at a time; stops when offline.
     pub fn prefetch_lyrics(mut self: Pin<&mut Self>) {

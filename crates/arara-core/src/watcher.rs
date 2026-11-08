@@ -46,7 +46,11 @@ impl LibraryWatcher {
             }
         })?;
         for r in roots {
-            w.watch(r, RecursiveMode::Recursive)?;
+            // One unreadable folder (e.g. a locked external disk) must not
+            // turn off watching for the others.
+            if let Err(e) = w.watch(r, RecursiveMode::Recursive) {
+                log::warn!("not watching {}: {e}", r.display());
+            }
         }
         std::thread::Builder::new()
             .name("arara-watch".into())

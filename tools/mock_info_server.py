@@ -31,6 +31,14 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query).get("query", [""])[0]; p = u.path
+        if p == "/ws/2/artist/" and "tag:" in q:
+            # "Similares": artists filed under a tag (made-up names, one already in the test library).
+            t = phrase(q, "tag"); area = phrase(q, "area")
+            names = [("Os Coqueiros", "Group", "Brazil"), ("Banda Vento Sul", "Group", "Brazil"), ("Clara Duarte", "Person", "Brazil"),
+                     ("Trio Areia Fina", "Group", "Brazil"), ("Rafa Monteiro", "Person", "Brazil"), ("Coletivo Farol", "Group", "Brazil")]
+            if not area:
+                names += [("The Paper Lanterns", "Group", "United Kingdom"), ("Mira Halvorsen", "Person", "Norway"), ("Static Orchard", "Group", "United States")]
+            return self.send({"artists": [{"id": "tag-" + n.replace(" ", "_"), "name": n, "type": ty, "area": {"name": ar}, "score": 100} for n, ty, ar in names]})
         if p == "/ws/2/artist/":
             n = phrase(q, "artist"); return self.send({"artists": [{"id": "art-" + n.replace(" ", "_"), "name": n, "score": 100}]})
         if p.startswith("/ws/2/artist/"):
@@ -39,7 +47,8 @@ class H(BaseHTTPRequestHandler):
             return self.send({"id": p.split("/")[-1], "name": n, "type": "Group" if group else "Person",
                 "disambiguation": "", "area": {"name": "Brasil"}, "begin-area": {"name": "Recife" if group else "Salvador"},
                 "life-span": {"begin": "2009-05-02" if group else "1991-08-14", "ended": False},
-                "genres": [{"name": "mpb", "count": 5}, {"name": "pop brasileiro", "count": 3}, {"name": "folk", "count": 1}],
+                "genres": ([{"name": "alternative rock", "count": 5}, {"name": "rock", "count": 4}, {"name": "brazilian", "count": 2}, {"name": "mpb", "count": 1}] if group else
+                           [{"name": "mpb", "count": 5}, {"name": "pop brasileiro", "count": 3}, {"name": "folk", "count": 1}]),
                 "relations": [{"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q42" + str(len(n))}}]})
         if p.startswith("/wiki/Special:EntityData/"):
             qid = p.split("/")[-1][:-5]

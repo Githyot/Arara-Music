@@ -368,7 +368,7 @@ mod tests {
             sample_rate: None,
             bit_depth: None,
             bitrate: None,
-            explicit: None,
+            explicit: None, art_hash: None, folder_art: None,
         }
     }
 

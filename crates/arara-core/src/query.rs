@@ -365,7 +365,7 @@ mod tests {
                 &NewTrack {
                     path: p, mtime: 100 + i as i64, size: 1, title: t, artist: ar, album_artist: ar,
                     album: *al, track_no: Some(i as u32 + 1), disc_no: None, year: *y, duration_ms: 1000,
-                    track_gain: None, album_gain: None, cover_hash: None, genre: *g, composer: None, format: None, sample_rate: None, bit_depth: None, bitrate: None, explicit: None,
+                    track_gain: None, album_gain: None, cover_hash: None, genre: *g, composer: None, format: None, sample_rate: None, bit_depth: None, bitrate: None, explicit: None, art_hash: None, folder_art: None,
                 },
                 0,
             )

@@ -480,7 +480,7 @@ mod tests {
                     cover_hash: None,
                     genre: None,
                     composer: None,
-                    format: None, sample_rate: None, bit_depth: None, bitrate: None, explicit: None,
+                    format: None, sample_rate: None, bit_depth: None, bitrate: None, explicit: None, art_hash: None, folder_art: None,
                 },
                 0,
             )
