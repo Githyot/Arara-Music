@@ -25,21 +25,32 @@ Item {
     property int motionFound: 0
     property string motionResult: ""
     property bool motionBulk: false     // "Baixar agora" running (not a single album page)
+    property var motionAlbums: []
+    property bool motionListOpen: false
+    signal openAlbum(int id)
+    function refreshMotionAlbums() {
+        try { motionAlbums = JSON.parse(library.motionAlbumsJson()) } catch (e) { motionAlbums = [] }
+    }
     function refreshMotion() {
         try { var m = JSON.parse(library.motionCacheJson()); motionFiles = m.files; motionBytes = m.bytes } catch (e) {}
     }
     Connections {
         target: library
         function onMotionProgress(done, total, found) {
-            if (!dlg.motionBulk) { if (dlg.visible) dlg.refreshMotion(); return }
-            if (done >= total) dlg.motionBulk = false
-            dlg.motionDone = done; dlg.motionTotal = done >= total ? 0 : total; dlg.motionFound = found
-            if (total > 0 && done >= total && !dlg.motionBulk)
-                dlg.motionResult = "Pronto: " + found + " de " + total + (total === 1 ? " álbum procurado tem" : " álbuns procurados têm") + " capa animada"
-            if (dlg.visible) dlg.refreshMotion()
+            if (dlg.motionBulk) {
+                if (done >= total) dlg.motionBulk = false
+                dlg.motionDone = done; dlg.motionTotal = done >= total ? 0 : total; dlg.motionFound = found
+                if (total > 0 && done >= total)
+                    dlg.motionResult = "Pronto: " + found + " de " + total + (total === 1 ? " álbum procurado tem" : " álbuns procurados têm") + " capa animada"
+            }
+            if (!dlg.visible) return
+            var before = dlg.motionFiles
+            dlg.refreshMotion()
+            // New covers show up in the open list as they arrive.
+            if (dlg.motionListOpen && dlg.motionFiles !== before) dlg.refreshMotionAlbums()
         }
     }
-    onVisibleChanged: if (visible) refreshMotion()
+    onVisibleChanged: if (visible) { refreshMotion(); if (motionListOpen) refreshMotionAlbums() }
     function open() { visible = true; card.forceActiveFocus() }
     function close() { visible = false }
 
@@ -471,11 +482,28 @@ Item {
                         }
                         ButtonRow {
                             visible: dlg.motionFiles > 0
+                            title: dlg.motionAlbums.length > 0 && dlg.motionListOpen
+                                ? (dlg.motionAlbums.length === 1 ? "1 álbum com capa animada" : dlg.motionAlbums.length + " álbuns com capa animada")
+                                : "Álbuns com capa animada"
+                            subtitle: dlg.motionListOpen ? "Clique num álbum para abrir e ver a capa animando" : "Veja quais álbuns ganharam capa animada"
+                            button: dlg.motionListOpen ? "Esconder" : "Ver álbuns"
+                            onClicked: { dlg.motionListOpen = !dlg.motionListOpen; if (dlg.motionListOpen) dlg.refreshMotionAlbums() }
+                        }
+                        Repeater {
+                            model: dlg.motionListOpen ? dlg.motionAlbums : []
+                            delegate: MotionAlbumRow {
+                                required property var modelData
+                                album: modelData
+                                onClicked: dlg.openAlbum(modelData.id)
+                            }
+                        }
+                        ButtonRow {
+                            visible: dlg.motionFiles > 0
                             title: "Capas animadas guardadas"
                             subtitle: dlg.motionFiles + (dlg.motionFiles === 1 ? " capa, " : " capas, ") + (dlg.motionBytes / 1048576).toFixed(1).replace(".", ",") + " MB no disco"
                             button: "Apagar"
                             destructive: true
-                            onClicked: { library.clearMotionCovers(); dlg.motionResult = ""; dlg.refreshMotion(); Prefs.motionCleared() }
+                            onClicked: { library.clearMotionCovers(); dlg.motionResult = ""; dlg.motionAlbums = []; dlg.motionListOpen = false; dlg.refreshMotion(); Prefs.motionCleared() }
                         }
                     }
                     Group {
@@ -755,6 +783,31 @@ Item {
                 font.family: Theme.font; font.pointSize: Theme.fontSize - 1
             }
         }
+    }
+
+    // One album of the "with animated cover" list: cover, title, artist; opens the album.
+    component MotionAlbumRow: RowBase {
+        id: mr
+        property var album: ({})
+        signal clicked()
+        title: ""
+        trailingWidth: 30
+        height: 56
+        color: ma.containsMouse ? Theme.hover : (Theme.fluent ? Theme.cardBg : "transparent")
+        CoverArt {
+            id: mrArt
+            anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+            width: 40; height: 40
+            source: mr.album.cover || ""
+        }
+        Column {
+            anchors { left: mrArt.right; leftMargin: 12; right: parent.right; rightMargin: 40; verticalCenter: parent.verticalCenter }
+            spacing: 2
+            Text { width: parent.width; text: mr.album.title || ""; color: Theme.fg; elide: Text.ElideRight; font.family: Theme.font; font.pointSize: Theme.fontSize }
+            Text { width: parent.width; text: (mr.album.artist || "") + (mr.album.year ? " · " + mr.album.year : ""); color: Theme.dimFg; elide: Text.ElideRight; font.family: Theme.font; font.pointSize: Theme.fontSize - 1.5 }
+        }
+        Icon { anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter } name: "go-next"; size: 16; color: Theme.dimFg }
+        MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: mr.clicked() }
     }
 
     component ButtonRow: RowBase {

@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.22
+Version:        0.7.26
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -45,6 +45,11 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.26-1
+- Capas animadas: Preferências > Biblioteca mostra a lista dos álbuns que
+  ganharam capa animada ("Ver álbuns"); clicar num deles abre o álbum. A
+  lista cresce enquanto "Baixar agora" encontra novas capas.
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.22-1
 - Junta as capas animadas à versão 0.7.21.
 - Capas animadas: quando o álbum tem capa animada no Apple Music, ela toca
