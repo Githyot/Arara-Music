@@ -41,14 +41,22 @@ Item {
     signal excerptSet(var track, real s, real e)
     signal excerptCleared(var track)
     signal playExcerpt()
+    // A/B loop: the part repeating now ({ s, e } or null).
+    property var loopRange: null
+    signal loopSet(real s, real e)
+    signal stopLoop()
+    signal menuRequested(var track, real x, real y)
 
     // Marking a new excerpt: "" (off), "start", then "end". A line of the
     // lyrics, or the current position, gives each point.
     property string marking: ""
+    // What the marked part is for: "excerpt" (favourite) or "loop".
+    property string markPurpose: "excerpt"
+    readonly property bool forLoop: markPurpose === "loop"
     property real pendingS: -1
     property real pendingSEnd: -1
     onTrackChanged: marking = ""
-    function startMarking() { pendingS = -1; pendingSEnd = -1; marking = "start" }
+    function startMarking(purpose) { markPurpose = purpose || "excerpt"; pendingS = -1; pendingSEnd = -1; marking = "start" }
     // t: where the picked point starts; e: where its line ends (same as t for
     // the current position).
     function pick(t, e) {
@@ -59,7 +67,8 @@ Item {
         if (t < pendingS) { s = t; end = Math.max(pendingSEnd, e) }
         if (end - s < 1000) end = s + 1000
         marking = ""
-        ls.excerptSet(ls.track, Math.round(s), Math.round(end))
+        if (forLoop) ls.loopSet(Math.round(s), Math.round(end))
+        else ls.excerptSet(ls.track, Math.round(s), Math.round(end))
     }
     function fmt(ms) {
         var t = Math.max(0, Math.round(ms / 1000))
@@ -201,6 +210,37 @@ Item {
                     color: hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(1, 1, 1, 0.1)
                     onClicked: { var p = plBtn.mapToItem(null, 0, plBtn.height); ls.addToPlaylist(ls.track, p.x, p.y) }
                 }
+                FlatButton {
+                    id: moreBtn
+                    icon: "more"; circular: true; iconColor: "white"
+                    color: hovered ? Qt.rgba(1, 1, 1, 0.2) : Qt.rgba(1, 1, 1, 0.1)
+                    onClicked: { var p = moreBtn.mapToItem(null, 0, moreBtn.height); ls.menuRequested(ls.track, p.x, p.y) }
+                }
+            }
+            // While a part repeats: what it is, and a way out.
+            Rectangle {
+                visible: ls.loopRange !== null
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: loopRow.implicitWidth + 20; height: 36; radius: 18
+                color: Qt.rgba(1, 1, 1, 0.16)
+                border.color: Qt.rgba(1, 1, 1, 0.25)
+                Row {
+                    id: loopRow
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Icon { anchors.verticalCenter: parent.verticalCenter; name: "repeat"; size: 16; color: "white" }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: ls.loopRange ? "Em loop: " + ls.fmt(ls.loopRange.s) + " – " + ls.fmt(ls.loopRange.e) : ""
+                        color: "white"; font.family: Theme.font; font.pointSize: Theme.fontSize; font.weight: Font.DemiBold
+                    }
+                    FlatButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        size: 26; circular: true; icon: "close"; iconColor: "white"; tip: "Parar o loop"
+                        color: hovered ? Qt.rgba(1, 1, 1, 0.25) : "transparent"
+                        onClicked: ls.stopLoop()
+                    }
+                }
             }
         }
     }
@@ -222,8 +262,8 @@ Item {
         onSeek: (ms) => ls.seek(ms)
         onAddLyrics: ls.editLyrics()
         picking: ls.marking !== ""
-        markFrom: ls.marking === "end" ? ls.pendingS : ls.marking === "" && ls.excerpt ? ls.excerpt.s : -1
-        markTo: ls.marking === "" && ls.excerpt ? ls.excerpt.e : -1
+        markFrom: ls.marking === "end" ? ls.pendingS : ls.marking !== "" ? -1 : ls.loopRange ? ls.loopRange.s : ls.excerpt ? ls.excerpt.s : -1
+        markTo: ls.marking !== "" ? -1 : ls.loopRange ? ls.loopRange.e : ls.excerpt ? ls.excerpt.e : -1
         onPicked: (t, e) => ls.pick(t, e)
     }
 
@@ -239,7 +279,7 @@ Item {
         width: Math.min(areaW - 24, markCol.implicitWidth + 32)
         height: markCol.implicitHeight + 24
         radius: 14
-        color: Qt.rgba(0, 0, 0, 0.55)
+        color: Qt.rgba(0.08, 0.08, 0.09, 0.86)
         border.color: Qt.rgba(1, 1, 1, 0.18)
         Column {
             id: markCol
@@ -251,8 +291,9 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
                 color: "white"; font.family: Theme.font; font.pointSize: Theme.fontSize + 1; font.weight: Font.DemiBold
+                readonly property string what: ls.forLoop ? "o trecho do loop" : "o trecho preferido"
                 text: ls.marking === "start"
-                    ? (ls.lyrics.kind === "synced" ? "Toque na linha onde o trecho preferido começa" : "Toque em “Começa aqui” quando o trecho preferido começar")
+                    ? (ls.lyrics.kind === "synced" ? "Toque na linha onde " + what + " começa" : "Toque em “Começa aqui” quando " + what + " começar")
                     : (ls.lyrics.kind === "synced" ? "Agora toque na linha onde ele termina" : "Agora toque em “Termina aqui” quando ele acabar")
             }
             Text {
@@ -261,6 +302,14 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 color: Qt.rgba(1, 1, 1, 0.75); font.family: Theme.font; font.pointSize: Theme.fontSize
                 text: "Começa em " + ls.fmt(ls.pendingS)
+            }
+            Text {
+                width: parent.width
+                visible: ls.forLoop && ls.marking === "start"
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                color: Qt.rgba(1, 1, 1, 0.75); font.family: Theme.font; font.pointSize: Theme.fontSize
+                text: "Ele vai repetir até você desligar. Para estudar com calma, diminua a velocidade no botão 1×."
             }
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -272,7 +321,13 @@ Item {
                     onClicked: ls.pick(ls.position, ls.position)
                 }
                 FlatButton {
-                    visible: ls.excerpt !== null && ls.marking === "start"
+                    visible: ls.forLoop && ls.excerpt !== null && ls.marking === "start"
+                    text: "Usar o trecho preferido"; textColor: "white"
+                    color: hovered ? Qt.rgba(1, 1, 1, 0.18) : "transparent"
+                    onClicked: { ls.marking = ""; ls.loopSet(ls.excerpt.s, ls.excerpt.e) }
+                }
+                FlatButton {
+                    visible: !ls.forLoop && ls.excerpt !== null && ls.marking === "start"
                     text: "Remover trecho"; textColor: "white"
                     color: hovered ? Qt.rgba(1, 1, 1, 0.18) : "transparent"
                     onClicked: { ls.marking = ""; ls.excerptCleared(ls.track) }

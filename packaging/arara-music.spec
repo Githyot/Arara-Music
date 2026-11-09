@@ -77,6 +77,11 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
   cifra junto com a letra sincronizada, partes que acendem com a música,
   loop A–B, som da música liga/desliga, velocidade, treino de ouvido e
   contagem de 0 a 5 s antes do play.
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.36-1
+- Trecho em loop: no menu de três pontinhos, "Repetir um trecho em loop"
+  pede o início e o fim (na letra ou pela posição atual) e repete essa
+  parte até você desligar, para estudar. A tela da letra ganhou o menu
+  de três pontinhos também.
 
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.35-1
 - Versão única com a 0.7.32 (números reais das faixas) e a 0.7.34

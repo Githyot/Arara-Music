@@ -32,6 +32,9 @@ Popup {
     signal study(var track)
     // Tem cifra do Arara Cypher para esta música? (lido ao abrir o menu)
     property bool hasSheet: false
+    // A/B loop: id of the song whose part is repeating now (-1 = none).
+    property int loopingId: -1
+    signal loopSection(var track)
     // Is the E badge showing for this track right now?
     readonly property bool explicitShown: {
         if (!track) return false
@@ -140,6 +143,14 @@ Popup {
             Item_ { icon: "next"; label: "Tocar a seguir"; onTriggered: { menu.playNext(menu.track); menu.close() } }
             Item_ { icon: "queue"; label: "Adicionar à fila"; onTriggered: { menu.enqueue(menu.track); menu.close() } }
             Item_ { icon: "playlist"; label: "Adicionar à playlist"; submenu: true; onTriggered: menu.showPlaylists = true }
+            Item_ {
+                readonly property bool isOn: !!menu.track && menu.track.id === menu.loopingId
+                visible: !!menu.track && !menu.track.free
+                icon: "repeat"
+                label: isOn ? "Parar o trecho em loop" : "Repetir um trecho em loop"
+                sub: isOn ? "" : "Escolha início e fim, para estudar"
+                onTriggered: { menu.loopSection(menu.track); menu.close() }
+            }
             Sep {}
             Item_ { icon: "station"; label: "Criar estação"; sub: "Músicas parecidas, sem parar"; onTriggered: { menu.startStation(menu.track); menu.close() } }
             Item_ {
