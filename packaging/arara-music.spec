@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.41
+Version:        0.7.44
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -48,6 +48,10 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Mon Nov 09 2026 Arara Music <noreply@anthropic.com> - 0.7.44-1
+- Versão única com a 0.7.36 (trecho em loop), a 0.7.37–0.7.41 (aba Estudos
+  com o Arara Cypher) e a 0.7.42 (mover a letra inteira no editor).
+
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.41-1
 - Cifra: sem a seção "Batida" geral no topo (cada parte já mostra a batida
   na tab) e sem o botão "Partitura" (o "Tudo" já mostra a partitura).
@@ -82,6 +86,9 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
   pede o início e o fim (na letra ou pela posição atual) e repete essa
   parte até você desligar, para estudar. A tela da letra ganhou o menu
   de três pontinhos também.
+* Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.42-1
+- Editor de letra (Sincronizar): "Mover a letra inteira" adianta ou atrasa
+  todas as linhas de uma vez (passo ajustável, teclas − e +, Desfazer).
 
 * Sun Nov 08 2026 Arara Music <noreply@anthropic.com> - 0.7.35-1
 - Versão única com a 0.7.32 (números reais das faixas) e a 0.7.34
