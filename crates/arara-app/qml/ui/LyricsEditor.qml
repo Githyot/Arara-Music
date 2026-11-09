@@ -7,6 +7,8 @@ import QtQuick.Controls.Basic as QQC
 //  1. "Texto": paste or type the lyrics, one line per sung line.
 //  2. "Sincronizar": play the song and press Enter at the start of each line
 //     (Backspace undoes, ← goes back 5 s). Click a line's time to re-stamp it.
+//     "Mover a letra inteira" shifts every stamped line earlier/later at once
+//     (− / + keys too), for lyrics that are all a bit ahead or behind.
 // Saving stores the LRC in the library (and optionally as song.lrc next to the
 // file); "Enviar ao LRCLIB" shares it so other players get it too.
 Rectangle {
@@ -19,7 +21,12 @@ Rectangle {
     property int cursor: 0
     property bool saved: false
     property bool publishing: false
-    property bool saveBeside: true      // Preferences › Letras › "Salvar ao lado das músicas"
+    property bool saveBeside: true
+    // whole-lyrics shift: lines as they were before the first shift, and the total
+    // applied on top (kept separately so going back past 0 s loses nothing)
+    property var shiftBase: null
+    property int shiftTotal: 0
+    property real shiftStep: 0.5        // seconds per − / + press      // Preferences › Letras › "Salvar ao lado das músicas"
     signal seek(real ms)
     signal togglePlay()
     signal save(string text, bool synced, bool sidecar)
@@ -31,6 +38,7 @@ Rectangle {
 
     function openWith(t, lyrics) {
         track = t; saved = false; publishing = false; step = "text"; cursor = 0
+        shiftBase = null; shiftTotal = 0
         sidecar.checked = saveBeside
         if (lyrics.kind === "synced") {
             lines = lyrics.lines.filter(function (l) { return l.text !== "" }).map(function (l) { return { text: l.text, t: l.t } })
@@ -49,16 +57,37 @@ Rectangle {
         lines = editor.text.split("\n").map(function (s) { return s.trim() }).filter(function (s) { return s !== "" })
             .map(function (s) { var t = (old[s] !== undefined && !used[s]) ? old[s] : -1; used[s] = true; return { text: s, t: t } })
         cursor = Math.max(0, lines.findIndex(function (l) { return l.t < 0 }))
+        shiftBase = null; shiftTotal = 0
         step = "sync"
         ed.forceActiveFocus()
     }
+    // move every stamped line by ms (negative = earlier); lines can't go below 0 s
+    function shiftAll(ms) {
+        if (!lines.some(function (l) { return l.t >= 0 })) return
+        if (!shiftBase) { shiftBase = lines.map(function (l) { return { text: l.text, t: l.t } }); shiftTotal = 0 }
+        shiftTotal += Math.round(ms)
+        var d = shiftTotal
+        lines = shiftBase.map(function (l) { return { text: l.text, t: l.t < 0 ? -1 : Math.max(0, l.t + d) } })
+        saved = false
+    }
+    function resetShift() {
+        if (!shiftBase) return
+        lines = shiftBase; shiftBase = null; shiftTotal = 0
+    }
+    // a manual stamp/undo starts from the shifted times
+    function keepShift() { shiftBase = null; shiftTotal = 0 }
+    function fmtShift(ms) {
+        return (ms > 0 ? "+" : ms < 0 ? "−" : "") + (Math.abs(ms) / 1000).toFixed(2).replace(".", ",") + " s"
+    }
     function mark() {
         if (cursor >= lines.length) return
+        keepShift()
         var l = lines.slice(); l[cursor] = { text: l[cursor].text, t: Math.round(position) }; lines = l
         cursor++; list.positionViewAtIndex(Math.min(cursor, lines.length - 1), ListView.Center)
     }
     function undo() {
         if (cursor <= 0) return
+        keepShift()
         cursor--
         var l = lines.slice(); l[cursor] = { text: l[cursor].text, t: -1 }; lines = l
         seek(Math.max(0, cursor > 0 ? lines[cursor - 1].t : 0))
@@ -85,6 +114,8 @@ Rectangle {
         else if (e.key === Qt.Key_Backspace) { undo(); e.accepted = true }
         else if (e.key === Qt.Key_Left) { seek(Math.max(0, position - 5000)); e.accepted = true }
         else if (e.key === Qt.Key_Space) { togglePlay(); e.accepted = true }
+        else if (e.key === Qt.Key_Minus) { shiftAll(-shiftStep * 1000); e.accepted = true }
+        else if (e.key === Qt.Key_Plus || e.key === Qt.Key_Equal) { shiftAll(shiftStep * 1000); e.accepted = true }
     }
 
     HeaderBar {
@@ -172,7 +203,7 @@ Rectangle {
                 MouseArea {
                     id: sm; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: if (modelData.t >= 0) ed.seek(modelData.t)
-                    onDoubleClicked: { ed.cursor = index; ed.forceActiveFocus() }
+                    onDoubleClicked: { ed.keepShift(); ed.cursor = index; ed.forceActiveFocus() }
                 }
             }
             Text {
@@ -188,9 +219,9 @@ Rectangle {
         id: syncBar
         visible: ed.step === "sync"
         anchors { left: parent.left; right: parent.right; bottom: footer.top }
-        height: visible ? 64 : 0; color: "transparent"
+        height: visible ? 108 : 0; color: "transparent"
         Row {
-            anchors.centerIn: parent
+            anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 10 }
             spacing: 10
             FlatButton { icon: "undo"; circular: true; onClicked: ed.undo() }
             FlatButton { icon: ed.playing ? "pause" : "play"; circular: true; size: 40; onClicked: ed.togglePlay() }
@@ -203,6 +234,73 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 text: ed.fmt(ed.position) + "   ·   " + ed.lines.filter(function (l) { return l.t >= 0 }).length + "/" + ed.lines.length
                 color: Theme.dimFg; font.family: "monospace"; font.pointSize: Theme.fontSize
+            }
+        }
+        // whole-lyrics shift: [−] [0,5 s] [+]   total   Desfazer
+        Row {
+            id: shiftRow
+            anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 10 }
+            spacing: 8
+            readonly property bool any: ed.lines.some(function (l) { return l.t >= 0 })
+            opacity: any ? 1 : 0.45
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Mover a letra inteira"
+                color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize
+            }
+            FlatButton {
+                text: "− Adiantar"; color: Theme.hover; size: 30
+                tip: "Mostra todas as linhas " + ed.fmtShift(ed.shiftStep * 1000).replace("+", "") + " mais cedo (tecla −)"
+                onClicked: { ed.shiftAll(-ed.shiftStep * 1000); ed.forceActiveFocus() }
+            }
+            Rectangle {
+                width: 74; height: 30; radius: Theme.radius; anchors.verticalCenter: parent.verticalCenter
+                color: Theme.cardBg
+                border.color: stepIn.activeFocus ? Theme.accent : Theme.border; border.width: stepIn.activeFocus ? 2 : 1
+                TextInput {
+                    id: stepIn
+                    anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                    width: 36
+                    horizontalAlignment: TextInput.AlignRight
+                    text: ed.shiftStep.toFixed(Math.round(ed.shiftStep * 100) % 10 ? 2 : 1).replace(".", ",")
+                    color: Theme.fg; selectionColor: Theme.accent; selectedTextColor: "white"
+                    font.family: "monospace"; font.pointSize: Theme.fontSize
+                    selectByMouse: true
+                    validator: RegularExpressionValidator { regularExpression: /^\d{0,2}([.,]\d{0,2})?$/ }
+                    function apply() {
+                        var v = parseFloat(text.replace(",", "."))
+                        if (v > 0) ed.shiftStep = Math.min(60, v)
+                        text = Qt.binding(function () { return ed.shiftStep.toFixed(Math.round(ed.shiftStep * 100) % 10 ? 2 : 1).replace(".", ",") })
+                    }
+                    onEditingFinished: apply()
+                    Keys.onReturnPressed: { apply(); ed.forceActiveFocus() }
+                    Keys.onEnterPressed: { apply(); ed.forceActiveFocus() }
+                }
+                Text {
+                    anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                    text: "s"; color: Theme.dimFg; font.family: "monospace"; font.pointSize: Theme.fontSize
+                }
+            }
+            FlatButton {
+                text: "Atrasar +"; color: Theme.hover; size: 30
+                tip: "Mostra todas as linhas " + ed.fmtShift(ed.shiftStep * 1000).replace("+", "") + " mais tarde (tecla +)"
+                onClicked: { ed.shiftAll(ed.shiftStep * 1000); ed.forceActiveFocus() }
+            }
+            // always laid out (just faded) so the buttons never move between clicks
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 86; horizontalAlignment: Text.AlignRight
+                opacity: ed.shiftBase !== null ? 1 : 0
+                text: ed.fmtShift(ed.shiftTotal)
+                color: Theme.accentFg; font.family: "monospace"; font.pointSize: Theme.fontSize
+                font.weight: Font.DemiBold
+            }
+            FlatButton {
+                opacity: ed.shiftBase !== null ? 1 : 0
+                enabled: ed.shiftBase !== null
+                text: "Desfazer"; size: 30
+                tip: "Volta os tempos para como estavam"
+                onClicked: { ed.resetShift(); ed.forceActiveFocus() }
             }
         }
     }
