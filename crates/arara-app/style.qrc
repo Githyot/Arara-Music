@@ -81,5 +81,6 @@
     <file alias="icons/sidebar.svg">qml/style/icons/sidebar.svg</file>
     <file alias="icons/folder.svg">qml/style/icons/folder.svg</file>
     <file alias="icons/import.svg">qml/style/icons/import.svg</file>
+    <file alias="icons/study.svg">qml/style/icons/study.svg</file>
   </qresource>
 </RCC>

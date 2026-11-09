@@ -81,6 +81,11 @@ Item {
                 current: side.page === "home"
                 onClicked: side.navigate("home")
             }
+            SidebarRow {
+                width: col.width; icon: "study"; text: "Estudos"
+                current: side.page === "studies" || side.page === "practice"
+                onClicked: side.navigate("studies")
+            }
             Section {
                 key: "library"; title: "Biblioteca"
                 rows: [

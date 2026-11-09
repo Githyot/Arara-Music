@@ -1,0 +1,12 @@
+[package]
+# Núcleo do Arara Cypher (github.com/Githyot/Arara-Cypher), trazido para dentro
+# do Arara Music para a aba Estudos. Rust puro, sem Qt: `cargo test -p araracypher-core`.
+name = "araracypher-core"
+description = "Lógica de cifras, acordes e tablaturas do Arara Cypher (sem dependência de Qt)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

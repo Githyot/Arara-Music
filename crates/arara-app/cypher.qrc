@@ -1,0 +1,45 @@
+<RCC>
+  <qresource prefix="/qt/qml/AraraCypher">
+    <file alias="qmldir">qml/cypher/qmldir</file>
+    <file alias="AppButton.qml">qml/cypher/AppButton.qml</file>
+    <file alias="AppScrollBar.qml">qml/cypher/AppScrollBar.qml</file>
+    <file alias="AppTextArea.qml">qml/cypher/AppTextArea.qml</file>
+    <file alias="AppTextField.qml">qml/cypher/AppTextField.qml</file>
+    <file alias="BigChordDiagram.qml">qml/cypher/BigChordDiagram.qml</file>
+    <file alias="Card.qml">qml/cypher/Card.qml</file>
+    <file alias="ChordDiagram.qml">qml/cypher/ChordDiagram.qml</file>
+    <file alias="ChordEditor.qml">qml/cypher/ChordEditor.qml</file>
+    <file alias="ChordTab.qml">qml/cypher/ChordTab.qml</file>
+    <file alias="Collapsible.qml">qml/cypher/Collapsible.qml</file>
+    <file alias="EditorPage.qml">qml/cypher/EditorPage.qml</file>
+    <file alias="Examples.qml">qml/cypher/Examples.qml</file>
+    <file alias="FretInput.qml">qml/cypher/FretInput.qml</file>
+    <file alias="HandLegend.qml">qml/cypher/HandLegend.qml</file>
+    <file alias="HeaderBar.qml">qml/cypher/HeaderBar.qml</file>
+    <file alias="Icon.qml">qml/cypher/Icon.qml</file>
+    <file alias="LessonTab.qml">qml/cypher/LessonTab.qml</file>
+    <file alias="LibraryPage.qml">qml/cypher/LibraryPage.qml</file>
+    <file alias="MetroSound.qml">qml/cypher/MetroSound.qml</file>
+    <file alias="NavItem.qml">qml/cypher/NavItem.qml</file>
+    <file alias="NotationView.qml">qml/cypher/NotationView.qml</file>
+    <file alias="PlaceholderPage.qml">qml/cypher/PlaceholderPage.qml</file>
+    <file alias="PracticePage.qml">qml/cypher/PracticePage.qml</file>
+    <file alias="ScoreRow.qml">qml/cypher/ScoreRow.qml</file>
+    <file alias="SectionTitle.qml">qml/cypher/SectionTitle.qml</file>
+    <file alias="SectionView.qml">qml/cypher/SectionView.qml</file>
+    <file alias="SlideLine.qml">qml/cypher/SlideLine.qml</file>
+    <file alias="SegmentedControl.qml">qml/cypher/SegmentedControl.qml</file>
+    <file alias="SettingsPage.qml">qml/cypher/SettingsPage.qml</file>
+    <file alias="SongPage.qml">qml/cypher/SongPage.qml</file>
+    <file alias="StrumSlots.qml">qml/cypher/StrumSlots.qml</file>
+    <file alias="StrumStrip.qml">qml/cypher/StrumStrip.qml</file>
+    <file alias="StrumTab.qml">qml/cypher/StrumTab.qml</file>
+    <file alias="StudiesPage.qml">qml/cypher/StudiesPage.qml</file>
+    <file alias="StudyPage.qml">qml/cypher/StudyPage.qml</file>
+    <file alias="TabEditor.qml">qml/cypher/TabEditor.qml</file>
+    <file alias="TabScore.qml">qml/cypher/TabScore.qml</file>
+    <file alias="TabText.qml">qml/cypher/TabText.qml</file>
+    <file alias="Theme.qml">qml/cypher/Theme.qml</file>
+    <file alias="TunerPage.qml">qml/cypher/TunerPage.qml</file>
+  </qresource>
+</RCC>

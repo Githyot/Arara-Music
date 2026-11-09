@@ -4,6 +4,9 @@ fn main() {
     // style.qrc files are not tracked by cxx-qt-build; rebuild when they change.
     println!("cargo:rerun-if-changed=qml/style");
     println!("cargo:rerun-if-changed=style.qrc");
+    // Arara Cypher (aba Estudos): QML em qml/cypher, módulo `AraraCypher`.
+    println!("cargo:rerun-if-changed=qml/cypher");
+    println!("cargo:rerun-if-changed=cypher.qrc");
     CxxQtBuilder::new_qml_module(QmlModule::new("io.github.arara")
         .qml_files([
         "qml/ui/Main.qml",
@@ -56,8 +59,11 @@ fn main() {
     ]))
     // Theme singleton lives in its own tiny module so every file can `import AraraStyle`.
     .qrc("style.qrc")
+    .qrc("cypher.qrc")
     .qt_module("Quick")
     .qt_module("Multimedia")
-    .files(["src/bridge.rs", "src/models.rs"])
+    .files(["src/bridge.rs", "src/models.rs", "src/cypher.rs"])
+    // Microfone do afinador do Arara Cypher (QAudioSource, em C++).
+    .cpp_files(["cpp/cypher/mic.h", "cpp/cypher/mic.cpp", "cpp/cypher/register.cpp"])
     .build();
 }

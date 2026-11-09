@@ -6,6 +6,7 @@ import QtMultimedia
 import QtQuick.Dialogs
 import AraraStyle
 import io.github.arara
+import AraraCypher as Cypher
 
 // Main window: AdwNavigationSplitView-style layout (sidebar + content),
 // AdwBottomSheet-style player bar, full-screen "now playing" sheet.
@@ -24,7 +25,8 @@ Window {
     // Wide windows dock the player on the right (like Nocturne); narrow ones keep the bottom bar.
     readonly property bool wide: width >= 1000
     property bool panelOpen: true
-    readonly property bool panelDocked: !lyricsMode
+    // The lyrics screen and the study mode (Estudar) have their own controls and use the full width.
+    readonly property bool panelDocked: !lyricsMode && !practicing && !(nav.page === "studies" && prefs.hidestudypanel)
     property bool lyricsMode: false
     // ---------- preferences ----------
     // Every setting lives here, typed; stored as "pref:<key>" strings
@@ -39,7 +41,8 @@ Window {
         xfmode: "crossfade", xfdur: 6, xfcurve: "equal", xftrim: true, xfalbum: true,
         xfmanual: true, xfpause: true, xfbeat: false, xfloud: true, xflatency: 160,
         hidden: [], collapsed: ({ categories: true }), winbuttons: "close",
-        edittags: true, hidedupes: true
+        edittags: true, hidedupes: true,
+        hidestudypanel: false   // aba Estudos sem o player do lado
     })
     property var prefs: prefDefaults
     function loadPrefs() {
@@ -95,11 +98,99 @@ Window {
         }
         excerptRev++
     }
+    // ---------- A/B loop ----------
+    readonly property bool looping: excerptPlay.active && excerptPlay.loop
+    readonly property var loopRange: looping ? { s: excerptPlay.start, e: excerptPlay.end } : null
+    // From the track menu: plays the song (if needed), opens the lyrics screen
+    // and asks for the start and the end of the part to repeat.
+    function loopSection(t) {
+        if (looping && player.current && player.current.id === t.id) { stopLoop(); return }
+        win.showLyricsOf(t)
+        Qt.callLater(function () { lyricsScreen.startMarking("loop") })
+    }
+    function startLoop(s, e) {
+        excerptPlay.begin(s, e, true)
+        toast.show("Repetindo " + fmtMs(s) + " – " + fmtMs(e) + " em loop")
+    }
+    function stopLoop() {
+        if (!looping) return
+        excerptPlay.active = false
+        toast.show("Loop desligado")
+    }
     function fmtMs(ms) {
         var t = Math.max(0, Math.round(ms / 1000))
         return Math.floor(t / 60) + ":" + ("0" + (t % 60)).slice(-2)
     }
     property bool loadingLyrics: false
+    // ---------- Estudos (Arara Cypher) ----------
+    // Modo Estudar: a cifra da música tocando no player. Enquanto estuda, o
+    // fim da música não passa para a próxima e as transições ficam paradas.
+    readonly property bool practicing: nav.page === "practice" && !!practiceSheet
+    property var practiceSheet: null
+    readonly property bool currentHasSheet: {
+        CypherLibrary.revision
+        var t = player.current
+        return !!t && !t.free && CypherLibrary.hasSheet(t.title || "", t.artist || "")
+    }
+    property bool practiceBacking: true      // som da música (desligado = treino sem a gravação)
+    property real rateBeforePractice: -1
+    // Cifra do Arara Cypher para uma faixa, ou null.
+    function sheetFor(t) {
+        if (!t || t.free) return null
+        var j = CypherLibrary.sheetFor(t.title || "", t.artist || "")
+        return j ? JSON.parse(j) : null
+    }
+    // Exemplos do Cypher contam como cifra (lidos uma vez, é só texto).
+    Component.onCompleted: {
+        CypherLibrary.setExamples(JSON.stringify(Cypher.Examples.visibleSongs))
+        Cypher.Examples.trackFinder = win.trackForSheet
+    }
+    Connections {
+        target: Cypher.Examples
+        function onStudyRequested(track, sheet) { win.studyTrack(track, sheet) }
+    }
+    // Faixa da biblioteca que combina com a cifra (mesma regra de título e artista).
+    function trackForSheet(sheet) {
+        if (!sheet || !sheet.title) return null
+        CypherLibrary.revision   // relê quando a biblioteca de cifras muda
+        var found = JSON.parse(library.searchJson(sheet.title))
+        for (var i = 0; i < found.length; ++i)
+            if (CypherMusic.sheetMatches(sheet.title, sheet.artist || "", found[i].title || "", found[i].artist || "")) return found[i]
+        return null
+    }
+    function studyTrack(t, chosen) {
+        var sheet = chosen || sheetFor(t)
+        if (!sheet) {
+            // Sem cifra: abre o editor do Cypher já com o nome da música.
+            nav.root("studies")
+            studiesLoader.active = true
+            Qt.callLater(function () { if (studiesLoader.item) studiesLoader.item.newSheetFor(t.title, t.artist) })
+            toast.show("Ainda não tem cifra para “" + t.title + "”: escreva uma no editor")
+            return
+        }
+        practiceSheet = sheet
+        practiceBacking = true
+        if (!player.current || player.current.id !== t.id) {
+            // Entra logo depois da música atual e abre pausada, sem mexer no resto da fila.
+            if (!player.current) { player.queue = [t]; player.index = 0 }
+            else { var q = player.queue.slice(); q.splice(player.index + 1, 0, t); player.queue = q; player.index++ }
+            player.start(false)
+        }
+        win.lyricsMode = false
+        nav.go("practice")
+        nav.section = "practice"
+    }
+    // "Editar cifra" no modo Estudar: abre a cifra no editor da aba Estudos.
+    function editStudySheet(sh) {
+        nav.root("studies")
+        studiesLoader.active = true
+        if (studiesLoader.item) studiesLoader.item.editSheet(sh)
+    }
+    function leavePractice() {
+        practiceBacking = true
+        if (rateBeforePractice > 0) { win.setRate(rateBeforePractice); rateBeforePractice = -1 }
+    }
+    Connections { target: nav; function onPageChanged() { if (nav.page !== "practice") win.leavePractice() } }
     // Blurred cover + sampled colours of the current track, for backgrounds.
     property string backdrop: ""
     property var coverColors: []
@@ -434,7 +525,7 @@ Window {
         // Qt picks the default output only once, at startup. Follow the output chosen in
         // GNOME (headset, HDMI, line out…) whenever it changes, even mid-song.
         device: sysAudio.defaultAudioOutput
-        volume: win.userVolume
+        volume: win.userVolume * (win.practicing && !win.practiceBacking ? 0 : 1)
         gainFor: function (t) { return win.trackGain(t) }
         curve: win.prefs.xfcurve
         onRateApplied: (r) => library.mprisRate(r)
@@ -446,7 +537,8 @@ Window {
             toast.show("Não foi possível tocar “" + player.current.title + "”")
             if (++player.failures < 3) player.next()
         }
-        onEndOfMedia: player.next()
+        // Estudando: a música acaba e volta para o começo, pausada.
+        onEndOfMedia: win.practicing ? decks.load(player.current, 0, false) : player.next()
         onActiveLoaded: applyPendingSeek()
         onActiveStateChanged: {
             if (!media) return
@@ -584,7 +676,7 @@ Window {
         // Faster near the transition point so switches land within a few ms.
         interval: xf.nextAt > 0 && xf.nextAt - media.position < 1500 ? 15 : 200
         repeat: true
-        running: xf.mode !== "off" && media.playbackState === MediaPlayer.PlayingState
+        running: xf.mode !== "off" && media.playbackState === MediaPlayer.PlayingState && !win.practicing
         onTriggered: xf.tick()
     }
 
@@ -668,7 +760,7 @@ Window {
         property var trackInfo: null      // track whose info page is open
         property var tag: null            // {name, fromName, excludeArtist, area} of the open "Similares" page
         // Sub-pages always get a back button, even when reached with no history.
-        readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group" || page === "trackinfo" || page === "tag"
+        readonly property bool canGoBack: history.length > 0 || page === "album" || page === "artist" || page === "group" || page === "trackinfo" || page === "tag" || page === "practice"
         // Sidebar entry the current view belongs to (an album opened from a server keeps "server").
         property string section: "home"
 
@@ -689,7 +781,7 @@ Window {
             history = history.slice(0, -1)
             if (!h) {
                 // No history (e.g. restored state): go up to the parent listing.
-                root(page === "group" && group ? group.kind : page === "tag" ? "genre" : page === "artist" ? "artists" : page === "trackinfo" ? "songs" : page === "album" && section !== "album" ? section : "albums")
+                root(page === "group" && group ? group.kind : page === "tag" ? "genre" : page === "artist" ? "artists" : page === "trackinfo" ? "songs" : page === "practice" ? "studies" : page === "album" && section !== "album" ? section : "albums")
                 return
             }
             win.lyricsMode = false
@@ -778,6 +870,7 @@ Window {
             : page === "server" ? "Servidor"
             : page === "trackinfo" ? "Informações"
             : page === "tag" && tag ? "Similares"
+            : page === "studies" ? "Estudos" : page === "practice" ? "Estudar"
             : page === "songs" ? "Músicas" : page === "recap" ? "" : "Álbuns"
     }
 
@@ -993,6 +1086,13 @@ Window {
                             Text { anchors.verticalCenter: parent.verticalCenter; visible: !search.text; text: "Pesquisar na biblioteca"; color: Theme.dimFg; font: search.font }
                         }
                     },
+                    // Aba Estudos: esconder ou mostrar o player do lado (fica lembrado).
+                    FlatButton {
+                        visible: nav.page === "studies"
+                        icon: "sidebar"; checked: !win.prefs.hidestudypanel
+                        tip: win.prefs.hidestudypanel ? "Mostrar o player" : "Esconder o player"
+                        onClicked: win.setPref("hidestudypanel", !win.prefs.hidestudypanel)
+                    },
                     FlatButton { id: menuButton; icon: "menu"; onClicked: appMenu.openUnder(menuButton) }
                 ]
             }
@@ -1121,6 +1221,40 @@ Window {
                     onOpenTag: (tag) => nav.openTag(tag, nav.album ? nav.album.artist || "" : "", nav.album && nav.album.artistId ? nav.album.artistId : -1, "")
                     onRefreshCover: (id) => { library.refreshAlbumCover(id); toast.show("Procurando a capa nos arquivos do álbum…") }
                     onChooseCover: (id) => library.pickPath("cover:" + id, "Escolha a imagem da capa", false)
+                }
+                // Aba Estudos: o Arara Cypher inteiro. Só carrega na primeira visita.
+                Loader {
+                    id: studiesLoader
+                    anchors.fill: parent
+                    visible: nav.page === "studies"
+                    active: false
+                    onVisibleChanged: if (visible) active = true
+                    sourceComponent: Cypher.StudiesPage {}
+                }
+                Loader {
+                    id: practiceLoader
+                    anchors.fill: parent
+                    visible: nav.page === "practice"
+                    active: nav.page === "practice" && !!win.practiceSheet
+                    sourceComponent: Cypher.PracticePage {
+                        track: player.current
+                        sheet: win.practiceSheet
+                        position: media.position
+                        duration: media.duration > 0 ? media.duration : (player.current ? player.current.duration || 0 : 0)
+                        playing: media.playbackState === MediaPlayer.PlayingState
+                        loading: media.mediaStatus === MediaPlayer.LoadingMedia
+                        lyrics: win.lyrics
+                        lyricsLoading: win.loadingLyrics
+                        rate: Prefs.playbackRate
+                        backing: win.practiceBacking
+                        store: ({ get: function (k, d) { return library.setting(k, d) }, set: function (k, v) { library.setSetting(k, v) } })
+                        onSeek: (ms) => player.seekTo(ms)
+                        onTogglePlay: player.togglePlay()
+                        onRequestRate: (r) => { if (win.rateBeforePractice < 0) win.rateBeforePractice = Prefs.playbackRate; win.setRate(r) }
+                        onRequestBacking: (on) => win.practiceBacking = on
+                        // O Loader do Estudar some ao trocar de página: quem abre o editor é a janela.
+                        onEditSheet: (sh) => Qt.callLater(win.editStudySheet, sh)
+                    }
                 }
                 InfoPage {
                     id: infoPage
@@ -1253,7 +1387,13 @@ Window {
                     onEditLyrics: lyricsEditor.openWith(player.current, win.lyrics)
                     onStarToggled: (t, s) => win.onStar(t, s)
                     excerpt: win.excerpt
-                    excerptPlaying: excerptPlay.active
+                    hasSheet: win.currentHasSheet
+                    onStudy: { if (player.current) win.studyTrack(player.current) }
+                    excerptPlaying: excerptPlay.active && !excerptPlay.loop
+                    loopRange: win.loopRange
+                    onLoopSet: (s, e) => win.startLoop(s, e)
+                    onStopLoop: win.stopLoop()
+                    onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
                     onExcerptSet: (t, s, e) => win.setExcerpt(t, s, e)
                     onExcerptCleared: (t) => win.setExcerpt(t, -1, -1)
                     onPlayExcerpt: excerptPlay.toggle()
@@ -1304,7 +1444,11 @@ Window {
             onClose: { win.panelOpen = false; library.setSetting("panel", "0") }
             onStarToggled: (t, s) => win.onStar(t, s)
             excerpt: win.excerpt
-            excerptPlaying: excerptPlay.active
+            hasSheet: win.currentHasSheet
+            onStudy: { if (player.current) win.studyTrack(player.current) }
+            excerptPlaying: excerptPlay.active && !excerptPlay.loop
+            loopRange: win.loopRange
+            onStopLoop: win.stopLoop()
             onPlayExcerpt: excerptPlay.toggle()
             onMenuRequested: (t, x, y) => win.onTrackMenu(t, x, y)
             onGoArtist: (t) => win.goToArtistOf(t)
@@ -1382,8 +1526,11 @@ Window {
     TrackMenu {
         id: trackMenu
         parent: frame
+        loopingId: win.looping ? excerptPlay.trackId : -1
+        onLoopSection: (t) => win.loopSection(t)
         onPlayNext: (t) => player.playNext(t)
         onEnqueue: (t) => player.enqueue(t)
+        onStudy: (t) => win.studyTrack(t)
         onToggleExplicit: (t, shown) => {
             var e = library.setExplicit(t.id, shown ? 0 : 1)
             Prefs.setExplicit(t.id, e)
@@ -1484,13 +1631,21 @@ Window {
         property real start: 0
         property real last: 0
         property double since: 0
+        // A/B loop for studying a part: at the end it jumps back to the start
+        // and keeps going until it is turned off.
+        property bool loop: false
         function toggle() {
-            if (active) { stop(true); return }
+            if (active && !loop) { stop(true); return }
             var x = win.excerpt
             if (!x || !player.current) return
-            trackId = player.current.id; start = x.s; end = x.e; last = x.s; since = Date.now()
+            begin(x.s, x.e, false)
+        }
+        function begin(s, e, asLoop) {
+            if (!player.current) return
+            trackId = player.current.id; start = s; end = e; last = s; since = Date.now()
+            loop = asLoop
             active = true
-            player.seekTo(x.s)
+            player.seekTo(s)
             if (media.playbackState !== MediaPlayer.PlayingState) player.resume()
         }
         function stop(pause) {
@@ -1503,6 +1658,13 @@ Window {
             if (!player.current || player.current.id !== trackId) { active = false; return }
             // Right after the jump the backend may still report the old position.
             if (Date.now() - since < 800) { if (pos >= start - 200 && pos < end) last = pos; return }
+            if (loop) {
+                // Seeking inside the loop is fine; seeking away from it turns it off.
+                if (pos < start - 1500 || pos > end + 1500) { active = false; toast.show("Loop desligado"); return }
+                last = pos
+                if (pos >= end - 120) { since = Date.now(); last = start; player.seekTo(start) }
+                return
+            }
             // A jump by hand (not the playback moving on) cancels it.
             if (pos < start - 1500 || pos - last > 2500) { active = false; return }
             last = pos
@@ -1528,7 +1690,7 @@ Window {
         onImportPlaylists: importDialog.start()
         onShortcuts: prompt.info("Atalhos de teclado",
             "Espaço: tocar ou pausar\nCtrl+,: preferências\nCtrl+→ / Ctrl+←: próxima / anterior\nCtrl+F: buscar\nCtrl+L: letra em tela cheia\n[ / ]: mais devagar / mais rápido\n\\: velocidade normal\nEsc: voltar\nCtrl+Q: sair\n\nNo editor de letras: Enter marca o verso, Backspace desfaz, ← volta 5 s")
-        onAbout: prompt.info("Arara Music 0.7.35",
+        onAbout: prompt.info("Arara Music 0.7.44",
             "Player de música leve em Rust e Qt, com temas GNOME, Apple, Android e Windows.\nLetras do LRCLIB, servidores Navidrome e Jellyfin.\n\nLicença GPL-3.0 · ícones do tema Adwaita")
     }
     // Decodes the animated covers once for every place that shows them.

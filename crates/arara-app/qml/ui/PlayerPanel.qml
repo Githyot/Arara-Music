@@ -39,6 +39,11 @@ Rectangle {
     // Favourite excerpt (marked on the lyrics screen): a button plays it.
     property var excerpt: null
     property bool excerptPlaying: false
+    // Tem cifra no Arara Cypher: botão Estudar ao lado do trecho preferido.
+    property bool hasSheet: false
+    signal study()
+    property var loopRange: null
+    signal stopLoop()
     signal playExcerpt()
     signal menuRequested(var track, real x, real y)
     signal goArtist(var track)
@@ -235,12 +240,38 @@ Rectangle {
                     color: panel.excerptPlaying ? Qt.rgba(1, 1, 1, hovered ? 0.4 : 0.3) : hovered ? Qt.rgba(1, 1, 1, 0.2) : "transparent"
                     onClicked: panel.playExcerpt()
                 }
+                FlatButton {
+                    visible: panel.hasSheet
+                    icon: "study"; circular: true; iconColor: "white"
+                    tip: "Estudar: cifra, letra e loop"
+                    onClicked: panel.study()
+                }
                 FlatButton { icon: "lyrics"; circular: true; iconColor: "white"; tip: "Letra"; onClicked: panel.openLyrics() }
                 FlatButton { icon: "queue"; circular: true; iconColor: "white"; tip: "Fila"; onClicked: panel.tab = "queue" }
                 FlatButton {
                     id: more; icon: "more"; circular: true; iconColor: "white"
                     onClicked: { var p = more.mapToItem(null, 0, more.height); panel.menuRequested(panel.track, p.x, p.y) }
                 }
+            }
+            // A/B loop running: shows the part, click to stop.
+            Rectangle {
+                visible: panel.loopRange !== null && panel.track !== null
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: pLoopRow.implicitWidth + 20; height: 32; radius: 16
+                color: pLoopMa.containsMouse ? Qt.rgba(1, 1, 1, 0.24) : Qt.rgba(1, 1, 1, 0.14)
+                Row {
+                    id: pLoopRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Icon { anchors.verticalCenter: parent.verticalCenter; name: "repeat"; size: 14; color: "white" }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: panel.loopRange ? "Em loop: " + fmtMs(panel.loopRange.s) + " – " + fmtMs(panel.loopRange.e) + "  ·  Parar" : ""
+                        color: "white"; font.family: Theme.font; font.pointSize: Theme.fontSize - 1; font.weight: Font.DemiBold
+                        function fmtMs(ms) { var t = Math.max(0, Math.round(ms / 1000)); return Math.floor(t / 60) + ":" + ("0" + (t % 60)).slice(-2) }
+                    }
+                }
+                MouseArea { id: pLoopMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: panel.stopLoop() }
             }
             // Lyrics under the controls; click to open the full lyrics screen.
             Item {
