@@ -18,6 +18,21 @@ extern "C" {
     fn arara_cypher_register_types();
 }
 
+#[cfg(target_os = "android")]
+extern "C" {
+    /// cpp/android/permissions.cpp: pede acesso às músicas e ao microfone.
+    fn arara_android_request_permissions();
+}
+
+/// Android: o Qt carrega libarara-music_arm64-v8a.so e chama `main` (ver
+/// crates/arara-android). No desktop é o `main` normal do binário.
+#[cfg(target_os = "android")]
+#[export_name = "main"]
+pub extern "C" fn android_main(_argc: i32, _argv: *const *const std::os::raw::c_char) -> i32 {
+    main();
+    0
+}
+
 fn main() {
     env_logger::init();
     watchdog::start();
@@ -37,6 +52,10 @@ fn main() {
         app.as_mut().set_organization_domain(&QString::from("io.github.githyot"));
     }
     unsafe { arara_cypher_register_types() };
+    #[cfg(target_os = "android")]
+    unsafe {
+        arara_android_request_permissions()
+    };
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         // Qt < 6.5 doesn't search qrc:/qt/qml by default.

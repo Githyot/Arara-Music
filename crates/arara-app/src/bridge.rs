@@ -652,6 +652,8 @@ fn default_music_dir() -> String {
     return directories::UserDirs::new()
         .and_then(|d| d.audio_dir().map(|p| p.to_string_lossy().into_owned()))
         .unwrap_or_else(|| format!("{}\\Music", std::env::var("USERPROFILE").unwrap_or_default()));
+    #[cfg(target_os = "android")]
+    return "/storage/emulated/0/Music".to_string();
     #[cfg(not(windows))]
     std::process::Command::new("xdg-user-dir")
         .arg("MUSIC")

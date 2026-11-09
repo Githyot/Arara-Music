@@ -86,6 +86,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arara-android"
+version = "0.7.44"
+dependencies = [
+ "arara-core",
+ "araracypher-core",
+ "cxx",
+ "cxx-qt",
+ "cxx-qt-build",
+ "cxx-qt-lib",
+ "directories",
+ "env_logger",
+ "libc",
+ "log",
+ "serde_json",
+ "zbus",
+]
+
+[[package]]
 name = "arara-app"
 version = "0.7.44"
 dependencies = [
