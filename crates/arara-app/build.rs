@@ -7,7 +7,7 @@ fn main() {
     // Arara Cypher (aba Estudos): QML em qml/cypher, módulo `AraraCypher`.
     println!("cargo:rerun-if-changed=qml/cypher");
     println!("cargo:rerun-if-changed=cypher.qrc");
-    CxxQtBuilder::new_qml_module(QmlModule::new("io.github.arara")
+    let builder = CxxQtBuilder::new_qml_module(QmlModule::new("io.github.arara")
         .qml_files([
         "qml/ui/Main.qml",
         "qml/ui/Decks.qml",
@@ -64,6 +64,12 @@ fn main() {
     .qt_module("Multimedia")
     .files(["src/bridge.rs", "src/models.rs", "src/cypher.rs"])
     // Microfone do afinador do Arara Cypher (QAudioSource, em C++).
-    .cpp_files(["cpp/cypher/mic.h", "cpp/cypher/mic.cpp", "cpp/cypher/register.cpp"])
-    .build();
+    .cpp_files(["cpp/cypher/mic.h", "cpp/cypher/mic.cpp", "cpp/cypher/register.cpp"]);
+    // Android: pedido de permissão para ler as músicas (crates/arara-android).
+    let builder = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
+        builder.cpp_file("cpp/android/permissions.cpp")
+    } else {
+        builder
+    };
+    builder.build();
 }

@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/arara-core", "crates/arara-cli", "crates/arara-app", "crates/cypher-core"]
+members = ["crates/arara-core", "crates/arara-cli", "crates/arara-app", "crates/cypher-core", "crates/arara-android"]
+# arara-android só compila para Android (packaging/android/build.sh).
+default-members = ["crates/arara-core", "crates/arara-cli", "crates/arara-app", "crates/cypher-core"]
 
 [workspace.package]
 version = "0.7.44"

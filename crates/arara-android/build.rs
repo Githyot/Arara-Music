@@ -1,0 +1,1 @@
+../arara-app/build.rs
