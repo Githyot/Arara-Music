@@ -115,8 +115,13 @@ pub struct TrackModelRust {
     covers_dir: PathBuf,
     resolver: remote::Resolver,
     sort: String,
-    /// Search by lyrics: the matching line (StyledText) of each song found by its words.
-    snippets: std::collections::HashMap<i64, String>,
+    /// Search by lyrics: the words searched, the songs found by title/artist/album
+    /// (no line shown for them) and, filled as rows scroll into view, the
+    /// matching line (StyledText) of each song found by its words.
+    lyric_words: Vec<String>,
+    lyric_skip: std::collections::HashSet<i64>,
+    snippets: std::cell::RefCell<std::collections::HashMap<i64, String>>,
+    snippet_db: std::cell::RefCell<Option<Db>>,
 }
 
 impl Default for TrackModelRust {
@@ -128,11 +133,40 @@ impl Default for TrackModelRust {
         if let Ok(v) = std::env::var("ARARA_COVERS") {
             p.covers = v.into();
         }
-        Self { count: 0, rows: Vec::new(), db_path: p.db, covers_dir: p.covers, resolver: Default::default(), sort: String::new(), snippets: Default::default() }
+        Self { count: 0, rows: Vec::new(), db_path: p.db, covers_dir: p.covers, resolver: Default::default(), sort: String::new(),
+               lyric_words: Vec::new(), lyric_skip: Default::default(), snippets: Default::default(), snippet_db: Default::default() }
     }
 }
 
 impl TrackModelRust {
+    fn clear_snippets(&mut self, words: Vec<String>, skip: std::collections::HashSet<i64>) {
+        self.lyric_words = words;
+        self.lyric_skip = skip;
+        self.snippets.borrow_mut().clear();
+    }
+
+    /// The lyric line shown under a song found by its words, worked out
+    /// only for rows on screen (a common word can match thousands of songs).
+    fn snippet(&self, id: i64) -> String {
+        if self.lyric_words.is_empty() || self.lyric_skip.contains(&id) {
+            return String::new();
+        }
+        if let Some(s) = self.snippets.borrow().get(&id) {
+            return s.clone();
+        }
+        let mut db = self.snippet_db.borrow_mut();
+        if db.is_none() {
+            *db = Db::open(&self.db_path).ok();
+        }
+        let line = db
+            .as_ref()
+            .and_then(|db| db.lyric_snippets(&[id], &self.lyric_words).ok())
+            .and_then(|mut m| m.remove(&id))
+            .unwrap_or_default();
+        self.snippets.borrow_mut().insert(id, line.clone());
+        line
+    }
+
     fn cover(&self, hash: &Option<String>, size: u32) -> String {
         hash.as_ref()
             .map(|h| remote::file_url(&self.covers_dir.join(format!("{h}-{size}.jpg")).to_string_lossy()))
@@ -166,7 +200,7 @@ impl qobject::TrackModel {
     pub fn load_all(self: Pin<&mut Self>) {
         let rows = Db::open(&self.db_path).and_then(|db| db.all_tracks()).unwrap_or_default();
         let mut this = self;
-        this.as_mut().rust_mut().snippets.clear();
+        this.as_mut().rust_mut().clear_snippets(Vec::new(), Default::default());
         this.replace_rows(rows);
     }
 
@@ -176,7 +210,7 @@ impl qobject::TrackModel {
         let rows = Db::open(&self.db_path)
             .and_then(|db| if q.trim().is_empty() { db.all_tracks() } else { db.search(&q, 2000) })
             .unwrap_or_default();
-        self.as_mut().rust_mut().snippets.clear();
+        self.as_mut().rust_mut().clear_snippets(Vec::new(), Default::default());
         self.replace_rows(rows);
     }
 
@@ -184,7 +218,7 @@ impl qobject::TrackModel {
         use arara_core::lyricsearch;
         let (q, sort) = (query.to_string(), sort.to_string());
         let parsed = arara_core::query::parse(&q);
-        let mut snippets = std::collections::HashMap::new();
+        let mut found = (Vec::new(), std::collections::HashSet::new());
         let rows = match Db::open(&self.db_path) {
             Ok(db) => {
                 // The search bar also looks in the words of the saved lyrics.
@@ -192,17 +226,11 @@ impl qobject::TrackModel {
                 // Songs found by their words show the line that matched; songs
                 // found by title/artist/album don't need it.
                 let text_words = lyricsearch::query_words(&parsed.text.join(" "));
-                let (words, skip) = if !parsed.lyrics.is_empty() {
-                    (parsed.lyrics.clone(), Default::default())
+                if !parsed.lyrics.is_empty() {
+                    found = (parsed.lyrics.clone(), Default::default());
                 } else if lyricsearch::long_enough(&text_words) {
                     let meta = db.metadata_matches(&text_words).unwrap_or_default();
-                    (text_words, meta)
-                } else {
-                    (Vec::new(), Default::default())
-                };
-                if !words.is_empty() {
-                    let ids: Vec<i64> = rows.iter().map(|t| t.id).filter(|id| !skip.contains(id)).take(3000).collect();
-                    snippets = db.lyric_snippets(&ids, &words).unwrap_or_default();
+                    found = (text_words, meta);
                 }
                 rows
             }
@@ -211,7 +239,7 @@ impl qobject::TrackModel {
         // A relevance-ranked search has no index letters.
         let has_text = !parsed.text.is_empty() || !parsed.lyrics.is_empty();
         self.as_mut().rust_mut().sort = if has_text && sort.is_empty() { "rank".into() } else { sort };
-        self.as_mut().rust_mut().snippets = snippets;
+        self.as_mut().rust_mut().clear_snippets(found.0, found.1);
         self.replace_rows(rows);
     }
 
@@ -304,7 +332,7 @@ impl qobject::TrackModel {
             Some("remote") => QVariant::from(&remote::is_remote(&t.path)),
             Some("quality") => s(t.quality().0),
             Some("explicit") => QVariant::from(&(t.explicit as i32)),
-            Some("lyric") => s(self.snippets.get(&t.id).map(String::as_str).unwrap_or("")),
+            Some("lyric") => s(&self.snippet(t.id)),
             _ => QVariant::default(),
         }
     }

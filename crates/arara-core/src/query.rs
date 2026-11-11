@@ -143,7 +143,11 @@ impl Db {
     /// saved searches don't). Title/artist/album hits come first.
     pub fn query_tracks_ext(&self, q: &str, sort: &str, limit: i64, with_lyrics: bool) -> Result<Vec<TrackRow>> {
         let p = parse(q);
-        let mut sql = format!("SELECT {TRACK_COLS} FROM tracks t LEFT JOIN albums a ON a.id = t.album_id");
+        // Full-text hits are gathered first (MATERIALIZED, so SQLite runs each
+        // FTS query once and indexes the ids) and the tracks are looked up by id.
+        let mut ctes: Vec<String> = Vec::new();
+        let mut from = String::from("tracks t");
+        let mut joins = String::new();
         let mut wh: Vec<String> = vec!["t.dup_of IS NULL".into()];
         let mut args: Vec<Value> = Vec::new();
         let mut rank: Option<&str> = None;
@@ -159,14 +163,13 @@ impl Db {
                 args.push(Value::Text(fts));
                 args.push(Value::Text(crate::lyricsearch::fts_query(&words)));
                 let (m, l) = (args.len() - 1, args.len());
-                sql.push_str(&format!(
-                    " LEFT JOIN (SELECT rowid AS id, rank AS r FROM tracks_fts WHERE tracks_fts MATCH ?{m}) fm ON fm.id = t.id
-                      LEFT JOIN (SELECT rowid AS id, rank AS r FROM lyrics_fts WHERE lyrics_fts MATCH ?{l}) fl ON fl.id = t.id"
-                ));
-                wh.push("(fm.id IS NOT NULL OR fl.id IS NOT NULL)".into());
+                ctes.push(format!("fm AS MATERIALIZED (SELECT rowid AS id, rank AS r FROM tracks_fts WHERE tracks_fts MATCH ?{m})"));
+                ctes.push(format!("fl AS MATERIALIZED (SELECT rowid AS id, rank AS r FROM lyrics_fts WHERE lyrics_fts MATCH ?{l})"));
+                from = "(SELECT id FROM fm UNION SELECT id FROM fl) h JOIN tracks t ON t.id = h.id".into();
+                joins.push_str(" LEFT JOIN fm ON fm.id = t.id LEFT JOIN fl ON fl.id = t.id");
                 rank = Some("fm.id IS NULL, fm.r, fl.r");
             } else {
-                sql.push_str(" JOIN tracks_fts f ON f.rowid = t.id");
+                joins.push_str(" JOIN tracks_fts f ON f.rowid = t.id");
                 args.push(Value::Text(fts));
                 wh.push(format!("tracks_fts MATCH ?{}", args.len()));
                 rank = Some("rank");
@@ -174,16 +177,16 @@ impl Db {
         }
         if !p.lyrics.is_empty() {
             args.push(Value::Text(crate::lyricsearch::fts_query(&p.lyrics)));
-            sql.push_str(&format!(
-                " JOIN (SELECT rowid AS id, rank AS r FROM lyrics_fts WHERE lyrics_fts MATCH ?{}) lx ON lx.id = t.id",
-                args.len()
-            ));
+            ctes.push(format!("lx AS MATERIALIZED (SELECT rowid AS id, rank AS r FROM lyrics_fts WHERE lyrics_fts MATCH ?{})", args.len()));
+            joins.push_str(" JOIN lx ON lx.id = t.id");
             rank = Some(match rank {
                 None => "lx.r",
                 Some("rank") => "f.rank, lx.r",
                 Some(r) => r,
             });
         }
+        let with = if ctes.is_empty() { String::new() } else { format!("WITH {} ", ctes.join(", ")) };
+        let mut sql = format!("{with}SELECT {TRACK_COLS} FROM {from} LEFT JOIN albums a ON a.id = t.album_id{joins}");
         for (f, v, exact) in &p.fields {
             let col = match f {
                 Field::Title => "t.title",
@@ -444,6 +447,44 @@ mod tests {
         assert!(titles("coracao", true).is_empty());
         // Too short to search the words of every song.
         assert!(titles("e", true).is_empty());
+    }
+
+    /// `cargo test --release -p arara-core big_lyrics_search -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn big_lyrics_search() {
+        let db = Db::open_in_memory().unwrap();
+        let w = ["amor", "sol", "mar", "vida", "coração", "noite", "dia", "tempo", "saudade", "estrada", "vento", "lua",
+                 "céu", "rio", "flor", "casa", "porta", "mundo", "sonho", "fogo", "eu", "que", "te", "o", "a", "de", "sei", "vou"];
+        let mut seed = 7u64;
+        let mut pick = || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; w[(seed % w.len() as u64) as usize] };
+        let tx = db.conn.unchecked_transaction().unwrap();
+        for i in 0..50_000 {
+            let title = format!("{} {}", pick(), pick());
+            let path = format!("/m/{i}.mp3");
+            upsert_track(&tx, &NewTrack {
+                path: &path, mtime: 1, size: 1, title: &title, artist: "Banda", album_artist: "Banda",
+                album: Some("Disco"), track_no: None, disc_no: None, year: None, duration_ms: 1000,
+                track_gain: None, album_gain: None, cover_hash: None, genre: None, composer: None, format: None, sample_rate: None, bit_depth: None, bitrate: None, explicit: None, art_hash: None, folder_art: None,
+            }, 0).unwrap();
+        }
+        for id in 1..=30_000i64 {
+            let text: Vec<String> = (0..30).map(|_| (0..7).map(|_| pick()).collect::<Vec<_>>().join(" ")).collect();
+            tx.execute("INSERT INTO lyrics(track_id, source, plain, fetched_at) VALUES (?1, 'lrclib', ?2, 0)", rusqlite::params![id, text.join("\n")]).unwrap();
+        }
+        tx.commit().unwrap();
+        let t = std::time::Instant::now();
+        db.index_lyrics_backlog().unwrap();
+        println!("backlog 30k: {:?}", t.elapsed());
+        for q in ["sol", "eu sei que vou", "saudade estrada", "letra:\"vento lua\""] {
+            let t = std::time::Instant::now();
+            let rows = db.query_tracks_ext(q, "", 0, true).unwrap();
+            let q1 = t.elapsed();
+            let words = crate::lyricsearch::query_words(q.trim_start_matches("letra:"));
+            let ids: Vec<i64> = rows.iter().map(|r| r.id).take(3000).collect();
+            let sn = db.lyric_snippets(&ids, &words).unwrap();
+            println!("{q}: {} rows in {q1:?}, {} snippets, total {:?}", rows.len(), sn.len(), t.elapsed());
+        }
     }
 
     #[test]

@@ -57,8 +57,8 @@ pub fn long_enough(words: &[String]) -> bool {
 }
 
 /// Byte spans of the words of `line` that start with one of `words`
-/// (folded comparison), plus a score: distinct query words found, and a
-/// bonus when they appear in the order typed, next to each other.
+/// (folded comparison), plus a score: distinct query words found (weighted
+/// by their length), and a bonus when they appear in the order typed, next to each other.
 fn hits(line: &str, words: &[String]) -> (usize, Vec<(usize, usize)>) {
     // Words of the line with their byte range in the original text.
     let mut toks: Vec<(usize, usize, String)> = Vec::new();
@@ -99,7 +99,9 @@ fn hits(line: &str, words: &[String]) -> (usize, Vec<(usize, usize)>) {
             }
         }
     }
-    (found.len() * 10 + best_run, spans)
+    // Longer words count more: "sol" says more than "o".
+    let weight: usize = found.iter().map(|&qi| words[qi].chars().count()).sum();
+    (weight * 10 + best_run, spans)
 }
 
 fn escape(s: &str) -> String {
@@ -112,14 +114,14 @@ fn escape(s: &str) -> String {
 pub fn snippet(text: &str, words: &[String]) -> Option<String> {
     let lines: Vec<&str> = text.lines().collect();
     // A line alone, or joined with the next one when the words cross a line
-    // break ("…eu sei / que vou te amar"); a pair must score clearly higher.
+    // break ("…eu sei / que vou te amar"); a pair must add a word of 2+ letters.
     let mut best: Option<(usize, String)> = None;
     for (i, l) in lines.iter().enumerate() {
         let mut cands = vec![(hits(l, words).0, l.to_string())];
         if let Some(next) = lines.get(i + 1) {
             let joined = format!("{l} / {next}");
             let s = hits(&joined, words).0;
-            if s >= cands[0].0.max(hits(next, words).0) + 10 {
+            if s >= cands[0].0.max(hits(next, words).0) + 20 {
                 cands.push((s, joined));
             }
         }
@@ -258,6 +260,12 @@ mod tests {
         // Accents and case don't matter.
         assert_eq!(snippet("Meu CORAÇÃO", &w("coracao")).unwrap(), "Meu <b>CORAÇÃO</b>");
         assert!(snippet(text, &w("xyz")).is_none());
+    }
+
+    #[test]
+    fn longer_words_win() {
+        let text = "O ipê roxo floriu\nDebaixo do sol que voltou";
+        assert_eq!(snippet(text, &w("o sol")).unwrap(), "Debaixo do <b>sol</b> que voltou");
     }
 
     #[test]
