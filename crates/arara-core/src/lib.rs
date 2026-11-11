@@ -11,6 +11,7 @@ pub mod import;
 pub mod info;
 pub mod infostore;
 pub mod lyrics;
+pub mod lyricsearch;
 pub mod motion;
 pub mod natural;
 pub mod query;

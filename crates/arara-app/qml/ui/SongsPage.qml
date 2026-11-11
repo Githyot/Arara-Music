@@ -34,10 +34,11 @@ Item {
     ]
     readonly property var scopes: [
         { k: "all", t: "Tudo" }, { k: "titulo", t: "Título" }, { k: "artista", t: "Artista" },
-        { k: "album", t: "Álbum" }, { k: "genero", t: "Gênero" }, { k: "ano", t: "Ano" }, { k: "compositor", t: "Compositor" }
+        { k: "album", t: "Álbum" }, { k: "genero", t: "Gênero" }, { k: "ano", t: "Ano" }, { k: "compositor", t: "Compositor" },
+        { k: "letra", t: "Letra" }
     ]
     readonly property bool hasText: query.trim() !== ""
-    readonly property string effectiveSort: hasText && !userSorted && scope === "all" ? "" : (sort === "" && !hasText ? "artist" : sort)
+    readonly property string effectiveSort: hasText && !userSorted && (scope === "all" || scope === "letra") ? "" : (sort === "" && !hasText ? "artist" : sort)
 
     function sortLabel(k) { var o = sortOptions.find(function (x) { return x.k === k }); return o ? o.t : "" }
     function scoped() {
@@ -178,6 +179,8 @@ Item {
             required property bool remote
             required property string quality
             required property int explicit
+            // Found by the words of its lyrics: the line that matched.
+            required property string lyric
             readonly property var track: ({ id: Number(trackId), title: title, artist: artist, album: album,
                                             albumId: Number(albumId) >= 0 ? Number(albumId) : null, duration: Number(duration),
                                             starred: starred, cover: cover, coverBig: coverBig, url: url, remote: remote, quality: quality,
@@ -196,6 +199,7 @@ Item {
                     anchors.fill: parent
                     radius: parent.radius
                     track: d.track; number: d.index; showArt: true
+                    lyric: d.lyric
                     playing: d.track.id === page.playingId
                     // play from here on (bounded queue, so huge libraries don't build huge queues)
                     onActivated: page.play(JSON.parse(model.sliceJson(d.index, 500)), 0)
@@ -227,7 +231,7 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: page.hasText
-            text: "Dica: artista:nome, genero:rock, ano:2010-2019, album:nome"
+            text: "Dica: artista:nome, genero:rock, ano:2010-2019, album:nome, letra:\"um trecho\""
             color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1
         }
     }
