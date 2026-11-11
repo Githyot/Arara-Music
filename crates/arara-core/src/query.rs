@@ -6,6 +6,7 @@
 //!   `artista:kanye`            contains; `artista:"Kanye West"` is exact
 //!   `album:` `genero:` `compositor:` `titulo:` `pasta:"/path"` (prefix)
 //!   `ano:2021` or `ano:2010-2019`, `fav:sim`
+//!   `letra:"eu sei que vou"`   words of the saved lyrics (see lyricsearch.rs)
 //! Filters combine with AND and with the free text.
 
 use rusqlite::types::Value;
@@ -21,6 +22,8 @@ pub struct Query {
     pub fields: Vec<(Field, String, bool)>,
     pub years: Option<(i64, i64)>,
     pub starred: bool,
+    /// `letra:` words (folded), matched against the saved lyrics.
+    pub lyrics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,6 +90,10 @@ pub fn parse(q: &str) -> Query {
                 }
                 continue;
             }
+            "letra" | "lyrics" | "lyric" => {
+                out.lyrics.extend(crate::lyricsearch::query_words(&v));
+                continue;
+            }
             "fav" | "favorita" | "favoritas" => {
                 out.starred = !matches!(fold(&v).as_str(), "nao" | "no" | "0");
                 continue;
@@ -128,10 +135,18 @@ pub struct GroupRow {
 impl Db {
     /// Search + filters + sort. An empty query with no filters lists the whole library.
     pub fn query_tracks(&self, q: &str, sort: &str, limit: i64) -> Result<Vec<TrackRow>> {
+        self.query_tracks_ext(q, sort, limit, false)
+    }
+
+    /// Like [`Db::query_tracks`]; with `with_lyrics` the free text also finds
+    /// songs by the words of their saved lyrics (the search bar does this,
+    /// saved searches don't). Title/artist/album hits come first.
+    pub fn query_tracks_ext(&self, q: &str, sort: &str, limit: i64, with_lyrics: bool) -> Result<Vec<TrackRow>> {
         let p = parse(q);
         let mut sql = format!("SELECT {TRACK_COLS} FROM tracks t LEFT JOIN albums a ON a.id = t.album_id");
         let mut wh: Vec<String> = vec!["t.dup_of IS NULL".into()];
         let mut args: Vec<Value> = Vec::new();
+        let mut rank: Option<&str> = None;
         if !p.text.is_empty() {
             let fts = p
                 .text
@@ -139,9 +154,35 @@ impl Db {
                 .map(|w| format!("\"{}\"*", w.replace('"', "")))
                 .collect::<Vec<_>>()
                 .join(" ");
-            sql.push_str(" JOIN tracks_fts f ON f.rowid = t.id");
-            args.push(Value::Text(fts));
-            wh.push(format!("tracks_fts MATCH ?{}", args.len()));
+            let words = crate::lyricsearch::query_words(&p.text.join(" "));
+            if with_lyrics && crate::lyricsearch::long_enough(&words) {
+                args.push(Value::Text(fts));
+                args.push(Value::Text(crate::lyricsearch::fts_query(&words)));
+                let (m, l) = (args.len() - 1, args.len());
+                sql.push_str(&format!(
+                    " LEFT JOIN (SELECT rowid AS id, rank AS r FROM tracks_fts WHERE tracks_fts MATCH ?{m}) fm ON fm.id = t.id
+                      LEFT JOIN (SELECT rowid AS id, rank AS r FROM lyrics_fts WHERE lyrics_fts MATCH ?{l}) fl ON fl.id = t.id"
+                ));
+                wh.push("(fm.id IS NOT NULL OR fl.id IS NOT NULL)".into());
+                rank = Some("fm.id IS NULL, fm.r, fl.r");
+            } else {
+                sql.push_str(" JOIN tracks_fts f ON f.rowid = t.id");
+                args.push(Value::Text(fts));
+                wh.push(format!("tracks_fts MATCH ?{}", args.len()));
+                rank = Some("rank");
+            }
+        }
+        if !p.lyrics.is_empty() {
+            args.push(Value::Text(crate::lyricsearch::fts_query(&p.lyrics)));
+            sql.push_str(&format!(
+                " JOIN (SELECT rowid AS id, rank AS r FROM lyrics_fts WHERE lyrics_fts MATCH ?{}) lx ON lx.id = t.id",
+                args.len()
+            ));
+            rank = Some(match rank {
+                None => "lx.r",
+                Some("rank") => "f.rank, lx.r",
+                Some(r) => r,
+            });
         }
         for (f, v, exact) in &p.fields {
             let col = match f {
@@ -179,7 +220,10 @@ impl Db {
             sql.push_str(" WHERE ");
             sql.push_str(&wh.join(" AND "));
         }
-        let order = if sort.is_empty() && !p.text.is_empty() { "rank" } else { order_by(sort) };
+        let order = match rank {
+            Some(r) if sort.is_empty() => r,
+            _ => order_by(sort),
+        };
         sql.push_str(&format!(" ORDER BY {order}"));
         if limit > 0 {
             sql.push_str(&format!(" LIMIT {limit}"));
@@ -373,6 +417,44 @@ mod tests {
             .unwrap();
         }
         db
+    }
+
+    #[test]
+    fn finds_songs_by_their_lyrics() {
+        let db = sample();
+        // ids follow insertion: Alpha 1, Beta 2, Gamma 3, Delta 4
+        db.store_lyrics(2, "lrclib", Some("[00:01.00]Eu sei que vou te amar\n[00:04.00]Por toda a minha vida"), None, 0).unwrap();
+        db.store_lyrics(3, "user", None, Some("Coração de estudante\nAlpha e ômega"), 0).unwrap();
+        let titles = |q: &str, lyr: bool| {
+            db.query_tracks_ext(q, "", 0, lyr).unwrap().into_iter().map(|t| t.title).collect::<Vec<_>>()
+        };
+        assert_eq!(titles("vou te am", true), vec!["Beta"]);
+        assert_eq!(titles("coracao", true), vec!["Gamma"]);
+        // Title hits first, then lyric hits.
+        assert_eq!(titles("alpha", true), vec!["Alpha", "Gamma"]);
+        // Saved searches (smart playlists) keep matching only title/artist/album…
+        assert_eq!(titles("alpha", false), vec!["Alpha"]);
+        // …unless they say letra:.
+        assert_eq!(titles("letra:\"minha vida\"", false), vec!["Beta"]);
+        assert_eq!(titles("letra:alpha artista:\"MC Y\"", false), vec!["Gamma"]);
+        // Edited lyrics replace the old words; forgotten lyrics stop matching.
+        db.store_lyrics(2, "user", None, Some("outra letra"), 0).unwrap();
+        assert!(titles("vou te am", true).is_empty());
+        db.delete_lyrics(3).unwrap();
+        assert!(titles("coracao", true).is_empty());
+        // Too short to search the words of every song.
+        assert!(titles("e", true).is_empty());
+    }
+
+    #[test]
+    fn indexes_lyrics_saved_before() {
+        let db = sample();
+        db.conn.execute("INSERT INTO lyrics(track_id, source, plain, fetched_at) VALUES (1, 'lrclib', 'velha canção', 0)", []).unwrap();
+        db.conn.execute("INSERT INTO lyrics(track_id, source, fetched_at) VALUES (2, 'none', 0)", []).unwrap();
+        assert!(db.query_tracks_ext("cancao", "", 0, true).unwrap().is_empty());
+        assert_eq!(db.index_lyrics_backlog().unwrap(), 1);
+        assert_eq!(db.query_tracks_ext("cancao", "", 0, true).unwrap()[0].title, "Alpha");
+        assert_eq!(db.index_lyrics_backlog().unwrap(), 0);
     }
 
     #[test]
