@@ -73,6 +73,11 @@ CREATE TABLE IF NOT EXISTS lyrics (
     fetched_at INTEGER NOT NULL
 );
 
+-- 0.7.45: the words of each saved lyric, for "search by lyrics" (see lyricsearch.rs).
+CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
+    words, tokenize='unicode61 remove_diacritics 2'
+);
+
 CREATE TABLE IF NOT EXISTS playlists (
     id    INTEGER PRIMARY KEY,
     name  TEXT NOT NULL,
@@ -617,6 +622,8 @@ impl Db {
             && q("SELECT 1 FROM kv WHERE k='track_no_from_name'")
             // 0.7.34: repeated songs.
             && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='dup_of'")
+            // 0.7.45: search by lyrics.
+            && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='lyrics_fts'")
     }
 
     /// Forget a hand-picked cover and mark the album's local files for the next
@@ -1111,6 +1118,7 @@ impl Db {
                  plain=excluded.plain, fetched_at=excluded.fetched_at",
             params![track_id, source, synced, plain, now],
         )?;
+        self.index_lyrics(track_id, synced, plain)?;
         let text = format!("{}\n{}", synced.unwrap_or_default(), plain.unwrap_or_default());
         let e = crate::explicit::lyrics_are_explicit(&text) as i64;
         self.conn.execute("UPDATE tracks SET explicit_lyrics=?1 WHERE id=?2", params![e, track_id])?;

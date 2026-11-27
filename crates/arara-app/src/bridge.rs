@@ -726,6 +726,15 @@ impl qobject::Library {
         // (the writer lock makes this wait for the local scan).
         crate::watchdog::step("sincronizando servidores");
         self.as_mut().sync_servers(-1);
+        // Search by lyrics: index the lyrics saved before 0.7.45 (once), off the UI thread.
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(n) = Db::open(&db_path).and_then(|db| db.index_lyrics_backlog()) {
+                if n > 0 {
+                    log::info!("lyrics search: indexed {n} saved lyrics");
+                }
+            }
+        });
         crate::watchdog::step("pronto");
     }
 
@@ -1422,7 +1431,7 @@ impl qobject::Library {
 
     pub fn refetch_lyrics(self: Pin<&mut Self>, track_id: i64) {
         if let Some(db) = self.db.as_ref() {
-            let _ = db.conn.execute("DELETE FROM lyrics WHERE track_id=?1", [track_id]);
+            let _ = db.delete_lyrics(track_id);
         }
         self.request_lyrics(track_id);
     }
