@@ -73,6 +73,11 @@ CREATE TABLE IF NOT EXISTS lyrics (
     fetched_at INTEGER NOT NULL
 );
 
+-- 0.7.45: the words of each saved lyric, for "search by lyrics" (see lyricsearch.rs).
+CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
+    words, tokenize='unicode61 remove_diacritics 2'
+);
+
 CREATE TABLE IF NOT EXISTS playlists (
     id    INTEGER PRIMARY KEY,
     name  TEXT NOT NULL,
@@ -617,6 +622,8 @@ impl Db {
             && q("SELECT 1 FROM kv WHERE k='track_no_from_name'")
             // 0.7.34: repeated songs.
             && q("SELECT 1 FROM pragma_table_info('tracks') WHERE name='dup_of'")
+            // 0.7.45: search by lyrics.
+            && q("SELECT 1 FROM sqlite_master WHERE type='table' AND name='lyrics_fts'")
     }
 
     /// Forget a hand-picked cover and mark the album's local files for the next
@@ -1007,6 +1014,18 @@ impl Db {
         Ok(())
     }
 
+    /// Playlists (by id) that already hold this song, with how many times.
+    /// Copies of the same song (see `dup_of`) count as the same song.
+    pub fn playlists_with_track(&self, track_id: i64) -> Result<Vec<(i64, i64)>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT i.playlist_id, COUNT(*) FROM playlist_items i JOIN tracks o ON o.id = i.track_id
+             WHERE COALESCE(o.dup_of, o.id) = COALESCE((SELECT dup_of FROM tracks WHERE id = ?1), ?1)
+             GROUP BY i.playlist_id",
+        )?;
+        let rows = st.query_map([track_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     /// Remove the item at `pos` and close the gap so positions stay contiguous.
     pub fn remove_from_playlist(&self, playlist_id: i64, pos: i64) -> Result<()> {
         self.conn.execute("DELETE FROM playlist_items WHERE playlist_id=?1 AND pos=?2", params![playlist_id, pos])?;
@@ -1111,6 +1130,7 @@ impl Db {
                  plain=excluded.plain, fetched_at=excluded.fetched_at",
             params![track_id, source, synced, plain, now],
         )?;
+        self.index_lyrics(track_id, synced, plain)?;
         let text = format!("{}\n{}", synced.unwrap_or_default(), plain.unwrap_or_default());
         let e = crate::explicit::lyrics_are_explicit(&text) as i64;
         self.conn.execute("UPDATE tracks SET explicit_lyrics=?1 WHERE id=?2", params![e, track_id])?;

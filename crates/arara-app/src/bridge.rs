@@ -212,6 +212,11 @@ pub mod qobject {
         #[cxx_name = "deletePlaylist"]
         fn delete_playlist(self: Pin<&mut Library>, playlist_id: i64);
 
+        /// `{ "<playlist id>": times }` for the playlists that already hold this song.
+        #[qinvokable]
+        #[cxx_name = "playlistsWithTrackJson"]
+        fn playlists_with_track_json(self: &Library, track_id: i64) -> QString;
+
         /// `track_ids_json` is a JSON array of ids.
         #[qinvokable]
         #[cxx_name = "addToPlaylist"]
@@ -726,6 +731,15 @@ impl qobject::Library {
         // (the writer lock makes this wait for the local scan).
         crate::watchdog::step("sincronizando servidores");
         self.as_mut().sync_servers(-1);
+        // Search by lyrics: index the lyrics saved before 0.7.45 (once), off the UI thread.
+        let db_path = self.db_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(n) = Db::open(&db_path).and_then(|db| db.index_lyrics_backlog()) {
+                if n > 0 {
+                    log::info!("lyrics search: indexed {n} saved lyrics");
+                }
+            }
+        });
         crate::watchdog::step("pronto");
     }
 
@@ -1341,6 +1355,17 @@ impl qobject::Library {
         self.tracks_to_json(db.playlist_tracks(playlist_id))
     }
 
+    pub fn playlists_with_track_json(&self, track_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("{}") };
+        let m: serde_json::Map<String, serde_json::Value> = db
+            .playlists_with_track(track_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(p, n)| (p.to_string(), json!(n)))
+            .collect();
+        qs(&serde_json::to_string(&m).unwrap())
+    }
+
     pub fn create_playlist(mut self: Pin<&mut Self>, name: &QString) -> i64 {
         let id = self.db.as_ref().and_then(|db| db.create_playlist(&name.to_string()).ok()).unwrap_or(-1);
         self.as_mut().playlists_changed();
@@ -1422,7 +1447,7 @@ impl qobject::Library {
 
     pub fn refetch_lyrics(self: Pin<&mut Self>, track_id: i64) {
         if let Some(db) = self.db.as_ref() {
-            let _ = db.conn.execute("DELETE FROM lyrics WHERE track_id=?1", [track_id]);
+            let _ = db.delete_lyrics(track_id);
         }
         self.request_lyrics(track_id);
     }

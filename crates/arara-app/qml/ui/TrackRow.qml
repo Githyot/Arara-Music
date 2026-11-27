@@ -19,6 +19,8 @@ Rectangle {
     readonly property color dimC: onDark ? Qt.rgba(1, 1, 1, 0.62) : Theme.dimFg
     readonly property color hiC: onDark ? "white" : Theme.accentFg
     property bool playing: false
+    // Search by lyrics: the matching line (StyledText, words in bold).
+    property string lyric: ""
     // On an album page the album artist is already in the header: hide it per row.
     property string hideArtist: ""
     property bool removable: false
@@ -113,11 +115,27 @@ Rectangle {
                     ink: row.onDark ? "#3a3a3a" : Theme.cardBg
                 }
             }
+            // Found by its lyrics: the line that matched, then the artist.
+            Row {
+                visible: row.lyric !== ""
+                width: parent.width
+                spacing: 5
+                Icon { id: lyricIcon; anchors.verticalCenter: parent.verticalCenter; name: "lyrics"; size: 12; color: row.hiC }
+                Text {
+                    width: Math.min(implicitWidth, parent.width - lyricIcon.width - parent.spacing)
+                    textFormat: Text.StyledText
+                    // Matched words in bold and in the text colour; the rest dimmed.
+                    text: "“" + row.lyric.replace(/<b>/g, "<b><font color=\"" + row.fgC + "\">").replace(/<\/b>/g, "</font></b>") + "”"
+                          + (row.track && row.track.artist ? "  ·  " + row.track.artist.replace(/&/g, "&amp;").replace(/</g, "&lt;") : "")
+                    color: row.dimC; elide: Text.ElideRight
+                    font.family: Theme.font; font.pointSize: Theme.fontSize - 1
+                }
+            }
             Text {
                 width: parent.width
+                visible: row.lyric === "" && text !== ""
                 // Files without tags have no artist/album: show just the title, centered.
                 text: !row.track ? "" : [row.track.artist === row.hideArtist ? "" : row.track.artist, row.showArt ? row.track.album : ""].filter(function (x) { return !!x }).join(" — ")
-                visible: text !== ""
                 color: row.dimC; elide: Text.ElideRight
                 font.family: Theme.font; font.pointSize: Theme.fontSize - 1
             }
