@@ -10,12 +10,14 @@ Popup {
     id: menu
     property var track: null
     property var playlists: []
+    // { "<playlist id>": times } for the playlists that already hold the song.
+    property var inPlaylists: ({})
     property bool showPlaylists: false
     // Hide "Ir para…" entries already on screen (e.g. the album page itself).
     property bool hasLyrics: true
     signal playNext(var track)
     signal enqueue(var track)
-    signal addToPlaylist(var track, int playlistId)
+    signal addToPlaylist(var track, int playlistId, int times)
     signal newPlaylistWith(var track)
     signal goToAlbum(var track)
     signal goToArtist(var track)
@@ -57,15 +59,15 @@ Popup {
         menu.x = Math.max(8, Math.min(x, parent.width - width - 8))
         menu.y = Math.max(8, Math.min(y, parent.height - h - 8))
     }
-    function openAt(t, x, y, lists) {
-        track = t; playlists = lists; showPlaylists = false
+    function openAt(t, x, y, lists, already) {
+        track = t; playlists = lists; showPlaylists = false; inPlaylists = already || ({})
         hasSheet = !!t && !t.free && CypherLibrary.hasSheet(t.title || "", t.artist || "")
         open(); place(x, y)
     }
 
     // Straight to the "add to playlist" list (button in the lyrics screen).
-    function openPlaylistsAt(t, x, y, lists) {
-        track = t; playlists = lists; showPlaylists = true
+    function openPlaylistsAt(t, x, y, lists, already) {
+        track = t; playlists = lists; showPlaylists = true; inPlaylists = already || ({})
         open(); place(x, y)
     }
     onShowPlaylistsChanged: if (visible) place(x, y)
@@ -88,6 +90,7 @@ Popup {
         property string sub: ""
         property string icon: ""
         property bool submenu: false
+        property bool checked: false
         signal triggered()
         width: menu.width - 12; height: sub !== "" ? 46 : 34; radius: Theme.material ? 0 : Theme.radius
         color: im.containsMouse ? Theme.hover : "transparent"
@@ -98,10 +101,11 @@ Popup {
             anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
         }
         Column {
-            anchors { left: parent.left; leftMargin: it.icon !== "" ? 36 : 12; right: parent.right; rightMargin: 24; verticalCenter: parent.verticalCenter }
+            anchors { left: parent.left; leftMargin: it.icon !== "" ? 36 : 12; right: parent.right; rightMargin: it.checked ? 36 : 24; verticalCenter: parent.verticalCenter }
             Text { width: parent.width; elide: Text.ElideRight; text: it.label; color: Theme.fg; font.family: Theme.font; font.pointSize: Theme.fontSize }
             Text { visible: it.sub !== ""; width: parent.width; elide: Text.ElideRight; text: it.sub; color: Theme.dimFg; font.family: Theme.font; font.pointSize: Theme.fontSize - 1.5 }
         }
+        Icon { visible: it.checked; anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter } name: "check"; size: 16; color: Theme.accent }
         Text { visible: it.submenu; anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter } text: "›"; color: Theme.dimFg; font.pointSize: Theme.fontSize + 2 }
         MouseArea { id: im; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: it.triggered() }
     }
@@ -199,9 +203,12 @@ Popup {
                 model: menu.playlists
                 Item_ {
                     required property var modelData
+                    readonly property int times: Number(menu.inPlaylists[String(modelData.id)] || 0)
                     icon: "playlist"
                     label: modelData.name
-                    onTriggered: { menu.addToPlaylist(menu.track, modelData.id); menu.close() }
+                    sub: times > 1 ? "Já adicionada " + times + " vezes" : times === 1 ? "Já adicionada" : ""
+                    checked: times > 0
+                    onTriggered: { menu.addToPlaylist(menu.track, modelData.id, times); menu.close() }
                 }
             }
             Item_ { icon: "add"; label: "Nova playlist…"; onTriggered: { menu.newPlaylistWith(menu.track); menu.close() } }

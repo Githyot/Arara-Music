@@ -1007,6 +1007,18 @@ impl Db {
         Ok(())
     }
 
+    /// Playlists (by id) that already hold this song, with how many times.
+    /// Copies of the same song (see `dup_of`) count as the same song.
+    pub fn playlists_with_track(&self, track_id: i64) -> Result<Vec<(i64, i64)>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT i.playlist_id, COUNT(*) FROM playlist_items i JOIN tracks o ON o.id = i.track_id
+             WHERE COALESCE(o.dup_of, o.id) = COALESCE((SELECT dup_of FROM tracks WHERE id = ?1), ?1)
+             GROUP BY i.playlist_id",
+        )?;
+        let rows = st.query_map([track_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     /// Remove the item at `pos` and close the gap so positions stay contiguous.
     pub fn remove_from_playlist(&self, playlist_id: i64, pos: i64) -> Result<()> {
         self.conn.execute("DELETE FROM playlist_items WHERE playlist_id=?1 AND pos=?2", params![playlist_id, pos])?;

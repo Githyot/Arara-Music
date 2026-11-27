@@ -985,7 +985,8 @@ Window {
         player.playList(t, 0)
         player.unshuffled = t.slice(); player.shuffle = true; player.save()
     }
-    function onTrackMenu(t, x, y) { trackMenu.openAt(t, x, y, sidebar.playlists) }
+    function onTrackMenu(t, x, y) { trackMenu.openAt(t, x, y, sidebar.playlists, win.playlistsWith(t)) }
+    function playlistsWith(t) { return t && t.id > 0 ? JSON.parse(library.playlistsWithTrackJson(t.id)) : ({}) }
     function onStar(t, s) { library.setStarred(t.id, s); t.starred = s; if (nav.page === "starred") nav.refresh() }
 
     // ---------- chrome ----------
@@ -1397,7 +1398,7 @@ Window {
                     onExcerptSet: (t, s, e) => win.setExcerpt(t, s, e)
                     onExcerptCleared: (t) => win.setExcerpt(t, -1, -1)
                     onPlayExcerpt: excerptPlay.toggle()
-                    onAddToPlaylist: (t, x, y) => { if (t && !t.free) trackMenu.openPlaylistsAt(t, x, y, sidebar.playlists) }
+                    onAddToPlaylist: (t, x, y) => { if (t && !t.free) trackMenu.openPlaylistsAt(t, x, y, sidebar.playlists, win.playlistsWith(t)) }
                     onRefetchLyrics: { if (!player.current) return; win.lyrics = { kind: "none" }; win.loadingLyrics = true; library.refetchLyrics(player.current.id) }
                 }
 
@@ -1536,10 +1537,18 @@ Window {
             Prefs.setExplicit(t.id, e)
             toast.show(shown ? "Selo E removido" : "Marcada como explícita")
         }
-        onAddToPlaylist: (t, pid) => {
-            library.addToPlaylist(pid, JSON.stringify([t.id]))
+        onAddToPlaylist: (t, pid, times) => {
             var p = sidebar.playlists.find(function (x) { return x.id === pid })
-            toast.show("Adicionada a “" + (p ? p.name : "playlist") + "”")
+            var name = p ? p.name : "playlist"
+            function add() {
+                library.addToPlaylist(pid, JSON.stringify([t.id]))
+                toast.show(times > 0 ? "Adicionada de novo a “" + name + "”" : "Adicionada a “" + name + "”")
+            }
+            if (times > 0)
+                prompt.confirm("Já está em “" + name + "”",
+                               "“" + t.title + "” já está nesta playlist" + (times > 1 ? " (" + times + " vezes)" : "") + ". Adicionar novamente?",
+                               "Adicionar", add, true)
+            else add()
         }
         onNewPlaylistWith: (t) => prompt.ask("Nova playlist", "Com “" + t.title + "”", "", "Criar", function (name) {
             var id = Number(library.createPlaylist(name))

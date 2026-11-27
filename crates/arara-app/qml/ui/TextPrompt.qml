@@ -19,9 +19,10 @@ Popup {
         destructive = false; needsText = true; infoOnly = false
         open(); field.forceActiveFocus(); field.selectAll()
     }
-    function confirm(h, b, label, cb) {
+    // `safe`: blue button instead of red (the action loses nothing).
+    function confirm(h, b, label, cb, safe) {
         heading = h; body = b; acceptLabel = label; onAccept = cb
-        destructive = true; needsText = false; infoOnly = false
+        destructive = !safe; needsText = false; infoOnly = false
         open()
     }
     // Message with a single "Fechar" button (about, shortcuts, import report).

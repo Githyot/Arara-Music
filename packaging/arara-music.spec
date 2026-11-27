@@ -5,7 +5,7 @@
 %{!?_metainfodir:%global _metainfodir %{_datadir}/metainfo}
 
 Name:           arara-music
-Version:        0.7.44
+Version:        0.7.46
 Release:        1%{?dist}
 Summary:        Player de música leve para GNOME, com letras sincronizadas
 License:        GPL-3.0-or-later
@@ -48,6 +48,9 @@ install -Dm644 %{_sourcedir}/LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LI
 %{_datadir}/icons/hicolor/scalable/apps/io.github.Githyot.AraraMusic.svg
 
 %changelog
+* Fri Nov 27 2026 Arara Music <noreply@anthropic.com> - 0.7.46-1
+- "Adicionar à playlist" marca as playlists que já têm a música e pergunta antes de adicionar de novo
+
 * Mon Nov 09 2026 Arara Music <noreply@anthropic.com> - 0.7.44-1
 - Versão única com a 0.7.36 (trecho em loop), a 0.7.37–0.7.41 (aba Estudos
   com o Arara Cypher) e a 0.7.42 (mover a letra inteira no editor).

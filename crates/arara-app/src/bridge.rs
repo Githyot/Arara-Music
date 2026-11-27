@@ -212,6 +212,11 @@ pub mod qobject {
         #[cxx_name = "deletePlaylist"]
         fn delete_playlist(self: Pin<&mut Library>, playlist_id: i64);
 
+        /// `{ "<playlist id>": times }` for the playlists that already hold this song.
+        #[qinvokable]
+        #[cxx_name = "playlistsWithTrackJson"]
+        fn playlists_with_track_json(self: &Library, track_id: i64) -> QString;
+
         /// `track_ids_json` is a JSON array of ids.
         #[qinvokable]
         #[cxx_name = "addToPlaylist"]
@@ -1339,6 +1344,17 @@ impl qobject::Library {
     pub fn playlist_tracks_json(&self, playlist_id: i64) -> QString {
         let Some(db) = &self.db else { return qs("[]") };
         self.tracks_to_json(db.playlist_tracks(playlist_id))
+    }
+
+    pub fn playlists_with_track_json(&self, track_id: i64) -> QString {
+        let Some(db) = &self.db else { return qs("{}") };
+        let m: serde_json::Map<String, serde_json::Value> = db
+            .playlists_with_track(track_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(p, n)| (p.to_string(), json!(n)))
+            .collect();
+        qs(&serde_json::to_string(&m).unwrap())
     }
 
     pub fn create_playlist(mut self: Pin<&mut Self>, name: &QString) -> i64 {
